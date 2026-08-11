@@ -22,6 +22,23 @@
 
 ---
 
+## Current execution status — 2026-08-11
+
+```text
+branch: Agentic_diagnose
+HEAD: 54404ad
+external RPD baseline: 0/500 (user-confirmed new session)
+local limiter baseline: 0
+AO reserve: 30
+offline check: npm run check PASS
+pilot: natural-rent-deposit, D/A6/AO = PASS/PASS/PASS
+pilot Gemini requests: D=2, A6=5, AO=2
+pilot observed external RPD: 9/500
+full M6C screening: pending
+```
+
+The pilot output is recorded in `logs/m6c-screening-pilot-2026-08-11.jsonl`. Full screening remains evaluation-only; no product integration decision has been made.
+
 # 0. 배경
 
 현재 `case-finder`는 자연어 질의에 대해 두 가지 검색 경로를 운용·시험 중이다.

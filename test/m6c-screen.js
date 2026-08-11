@@ -23,6 +23,7 @@ const arms = [
   { name: "AO", baseUrl: normalizeBaseUrl(option("ao-url", "http://127.0.0.1:3333")) },
 ];
 const timeoutMs = Math.max(5_000, Number.parseInt(option("timeout-ms", "700000"), 10) || 700_000);
+const externalBaselineUsed = Math.max(0, Number.parseInt(option("quota-baseline", "0"), 10) || 0);
 const externalLimit = Math.max(1, Number.parseInt(option("quota-limit", "500"), 10) || 500);
 const externalReserve = Math.max(0, Number.parseInt(option("quota-reserve", "30"), 10) || 30);
 const startIndex = Math.max(0, Number.parseInt(option("start", "0"), 10) || 0);
@@ -113,7 +114,7 @@ async function ask(arm, query) {
 await fs.mkdir(path.dirname(outputPath), { recursive: true });
 await fs.writeFile(outputPath, "", "utf8");
 
-let externalGeminiUsed = 0;
+let externalGeminiUsed = externalBaselineUsed;
 let completed = 0;
 let skippedByQuota = 0;
 const summary = { D: { runs: 0, valid: 0 }, A6: { runs: 0, valid: 0 }, AO: { runs: 0, valid: 0 } };
@@ -131,7 +132,7 @@ for (let caseIndex = 0; caseIndex < selectedCases.length; caseIndex += 1) {
         arm: arm.name,
         query: testCase.query,
         status: "SKIPPED_QUOTA_GUARD",
-        external_rpd: { baseline_used: 0, observed_used: externalGeminiUsed, limit: externalLimit, reserve: externalReserve },
+        external_rpd: { baseline_used: externalBaselineUsed, observed_used: externalGeminiUsed, limit: externalLimit, reserve: externalReserve },
       };
       await fs.appendFile(outputPath, `${JSON.stringify(skippedRecord)}\n`, "utf8");
       continue;
@@ -170,7 +171,7 @@ for (let caseIndex = 0; caseIndex < selectedCases.length; caseIndex += 1) {
       agent_stop_reason: result.agent_stop_reason || null,
       fallback_used: Boolean(result.fallback_used),
       fallback_reason: result.fallback_reason || [],
-      external_rpd: { baseline_used: 0, observed_used: externalGeminiUsed, limit: externalLimit, reserve: externalReserve },
+      external_rpd: { baseline_used: externalBaselineUsed, observed_used: externalGeminiUsed, limit: externalLimit, reserve: externalReserve },
       expected_case_numbers: expected,
       raw_agent_candidate_set: result.raw_agent_candidate_set || result.raw_agent_candidates || [],
       raw_agent_selection: rawSelection,
@@ -197,6 +198,6 @@ console.log(JSON.stringify({
   cases: selectedCases.length,
   completed,
   skipped_by_quota: skippedByQuota,
-  external_rpd: { baseline_used: 0, observed_used: externalGeminiUsed, limit: externalLimit, reserve: externalReserve },
+  external_rpd: { baseline_used: externalBaselineUsed, observed_used: externalGeminiUsed, limit: externalLimit, reserve: externalReserve },
   summary,
 }, null, 2));
