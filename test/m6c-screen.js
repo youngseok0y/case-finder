@@ -26,6 +26,8 @@ const timeoutMs = Math.max(5_000, Number.parseInt(option("timeout-ms", "700000")
 const externalBaselineUsed = Math.max(0, Number.parseInt(option("quota-baseline", "0"), 10) || 0);
 const externalLimit = Math.max(1, Number.parseInt(option("quota-limit", "500"), 10) || 500);
 const externalReserve = Math.max(0, Number.parseInt(option("quota-reserve", "30"), 10) || 30);
+const rpmLimit = Math.max(1, Number.parseInt(option("rpm-limit", "13"), 10) || 13);
+const rpmWindowMs = Math.max(1_000, Number.parseInt(option("rpm-window-ms", "60000"), 10) || 60_000);
 const startIndex = Math.max(0, Number.parseInt(option("start", "0"), 10) || 0);
 const requestedLimit = Number.parseInt(option("limit", String(golden.cases.length)), 10);
 const limit = Number.isInteger(requestedLimit) && requestedLimit >= 0
@@ -111,6 +113,26 @@ async function ask(arm, query) {
   }
 }
 
+let plannedGeminiCalls = [];
+
+async function waitForRpmBudget(expectedRequests) {
+  const startedAt = Date.now();
+  const requested = Math.max(1, expectedRequests);
+  while (true) {
+    const now = Date.now();
+    plannedGeminiCalls = plannedGeminiCalls.filter((timestamp) => timestamp > now - rpmWindowMs);
+    if (plannedGeminiCalls.length + requested <= rpmLimit) break;
+    const waitMs = Math.max(250, plannedGeminiCalls[0] + rpmWindowMs - now + 100);
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+  return Date.now() - startedAt;
+}
+
+function expectedGeminiRequests(arm, testCase) {
+  if (testCase.kind === "direct") return 0;
+  return arm.name === "D" ? 2 : 6;
+}
+
 await fs.mkdir(path.dirname(outputPath), { recursive: true });
 await fs.writeFile(outputPath, "", "utf8");
 
@@ -139,11 +161,15 @@ for (let caseIndex = 0; caseIndex < selectedCases.length; caseIndex += 1) {
     }
 
     const startedAt = Date.now();
+    const runnerRpmWaitMs = expectedGeminiRequests(arm, testCase) > 0
+      ? await waitForRpmBudget(expectedGeminiRequests(arm, testCase))
+      : 0;
     const payload = await ask(arm, testCase.query);
     const result = payload.result || {};
     const metrics = metricsFor(arm, result);
     const requestCount = Number(metrics?.gemini_requests || 0);
     externalGeminiUsed += Number.isFinite(requestCount) ? requestCount : 0;
+    for (let index = 0; index < requestCount; index += 1) plannedGeminiCalls.push(Date.now());
     const expected = expectedNumbers(testCase);
     const candidateSet = candidateSetFor(arm, result);
     const fallbackSet = fallbackSetFor(result);
@@ -167,8 +193,10 @@ for (let caseIndex = 0; caseIndex < selectedCases.length; caseIndex += 1) {
       status: errors.length === 0 ? "PASS" : "FAIL",
       protocol_errors: errors,
       elapsed_ms: Date.now() - startedAt,
+      runner_rpm_wait_ms: runnerRpmWaitMs,
       metrics,
       agent_stop_reason: result.agent_stop_reason || null,
+      agent_error_reason: result.agent_error_reason || null,
       fallback_used: Boolean(result.fallback_used),
       fallback_reason: result.fallback_reason || [],
       external_rpd: { baseline_used: externalBaselineUsed, observed_used: externalGeminiUsed, limit: externalLimit, reserve: externalReserve },

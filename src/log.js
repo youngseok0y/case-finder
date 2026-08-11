@@ -51,6 +51,7 @@ export async function logAgenticExperiment(query, result) {
     raw_agent_candidate_set: result.raw_agent_candidate_set || result.raw_agent_candidates || [],
     raw_agent_selection: result.raw_agent_selection || null,
     agent_stop_reason: result.agent_stop_reason || "unknown",
+    agent_error_reason: result.agent_error_reason || null,
     fallback_used: Boolean(result.fallback_used),
     fallback_reason: result.fallback_reason || [],
     fallback_candidate_set: result.fallback_candidate_set || [],

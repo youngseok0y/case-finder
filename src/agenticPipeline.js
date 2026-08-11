@@ -314,6 +314,17 @@ function publicAgentMetrics(metrics, stopReason, fallbackUsed) {
   };
 }
 
+function classifyAgentError(error) {
+  const reason = String(error?.reason || "");
+  if (error?.code === "GEMINI_LIMIT_EXCEEDED") {
+    if (/reserve/u.test(reason)) return "RPD_RESERVE_STOP";
+    if (/일일|daily|rpd/i.test(reason)) return "RPD_LIMIT_STOP";
+    if (/분당|rpm|minute/i.test(reason)) return "RPM_LIMIT_STOP";
+    return "GEMINI_LIMIT_STOP";
+  }
+  return "ERROR";
+}
+
 export async function runAgenticSearch(query) {
   const contents = [{ role: "user", parts: [{ text: query }] }];
   const candidates = new Map();
@@ -458,6 +469,7 @@ export async function runAgenticPipeline(query) {
   let rawAgentSelection = null;
   let agentStopReason = "ERROR";
   let agentTrace = null;
+  let agentErrorReason = null;
   let fallbackCandidateSet = [];
   const fallbackReasons = [];
   try {
@@ -470,7 +482,8 @@ export async function runAgenticPipeline(query) {
     const observedCandidates = error.observedCandidates || [];
     rawAgentCandidates = observedCandidates;
     rawAgentSelection = error.observedSelection || null;
-    agentStopReason = error.agentStopReason || "ERROR";
+    agentStopReason = error.agentStopReason || classifyAgentError(error);
+    agentErrorReason = error.reason || null;
     agentTrace = error.agentTrace || null;
     const fallbackCandidates = observedCandidates.length > 0
       ? observedCandidates
@@ -511,6 +524,7 @@ export async function runAgenticPipeline(query) {
       raw_agent_candidates: rawAgentCandidates.map(serializeCandidate),
       raw_agent_selection: serializeSelection(rawAgentSelection),
       agent_stop_reason: agentStopReason,
+      agent_error_reason: agentErrorReason,
       fallback_used: fallbackReasons.length > 0,
       fallback_reason: [...new Set(fallbackReasons)],
       raw_agent_candidate_set: rawAgentCandidates.map(serializeCandidate),
@@ -534,6 +548,7 @@ export async function runAgenticPipeline(query) {
     raw_agent_candidates: rawAgentCandidates.map(serializeCandidate),
     raw_agent_selection: serializeSelection(rawAgentSelection),
     agent_stop_reason: agentStopReason,
+    agent_error_reason: agentErrorReason,
     fallback_used: fallbackReasons.length > 0,
     fallback_reason: [...new Set(fallbackReasons)],
     raw_agent_candidate_set: rawAgentCandidates.map(serializeCandidate),
