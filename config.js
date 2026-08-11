@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 const currentFile = fileURLToPath(import.meta.url);
 const rootDir = path.dirname(currentFile);
 const configuredSearchDisplay = Number.parseInt(process.env.SEARCH_DISPLAY || "20", 10);
+const configuredAgenticMode = process.env.AGENTIC_MODE === "open" ? "open" : "bounded";
 
 export const ROOT_DIR = rootDir;
 export const EXPECTED_NODE_VERSION = ">=24.14.0 <25";
@@ -21,6 +22,10 @@ export const config = Object.freeze({
   geminiRpdLimit: 450,
   geminiRetryDelayMs: 20_000,
   agenticCallMax: Number.parseInt(process.env.AGENTIC_CALL_MAX || "6", 10),
+  agenticMode: configuredAgenticMode,
+  aoRpdReserve: Math.max(0, Number.parseInt(process.env.AO_RPD_RESERVE || "30", 10)),
+  aoNoNewEvidenceTurns: Math.max(1, Number.parseInt(process.env.AO_NO_NEW_EVIDENCE_TURNS || "3", 10)),
+  aoWallClockMaxMs: Math.max(60_000, Number.parseInt(process.env.AO_WALL_CLOCK_MAX_MS || "600000", 10)),
   searchConcurrency: 5,
   searchDisplay: Number.isInteger(configuredSearchDisplay)
     ? Math.min(100, Math.max(1, configuredSearchDisplay))

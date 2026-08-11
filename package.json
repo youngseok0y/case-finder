@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check config.js && node --check src/log.js && node --check src/mcpClient.js && node --check src/router.js && node --check src/directLookup.js && node --check src/rateLimiter.js && node --check src/gemini.js && node --check src/nlPipeline.js && node --check src/agenticPipeline.js && node --check src/validator.js && node --check src/renderer.js && node --check src/server.js && node --check test/run.js",
+    "check": "node --check config.js && node --check src/log.js && node --check src/mcpClient.js && node --check src/router.js && node --check src/directLookup.js && node --check src/rateLimiter.js && node --check src/gemini.js && node --check src/nlPipeline.js && node --check src/agenticPipeline.js && node --check src/validator.js && node --check src/renderer.js && node --check src/server.js && node --check test/run.js && node --check test/m6c-screen.js",
     "verify": "node test/run.js"
   },
   "dependencies": {

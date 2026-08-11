@@ -1,5 +1,4 @@
 import { config } from "../config.js";
-import { callTool } from "./mcpClient.js";
 import { generatePlan, selectCandidates } from "./gemini.js";
 import {
   lookupDecisionCandidate,
@@ -10,6 +9,7 @@ import {
   parseStatuteReferences,
   parseDecisionSearchResults,
   sanitizeApiLink,
+  trackedCallTool,
   toolText,
 } from "./directLookup.js";
 import { caseNumberIncludes, caseNumberKey, normalizeCaseNumber } from "./router.js";
@@ -64,13 +64,13 @@ export function rankCandidates(candidates, { applyPreviewPenalty = false } = {})
     .slice(0, config.candidateMax);
 }
 
-async function previewCandidate(candidate) {
+async function previewCandidate(candidate, telemetry = null) {
   try {
-    const result = await callTool("get_decision_text", {
+    const result = await trackedCallTool("get_decision_text", {
       domain: candidate.domain,
       id: candidate.id,
       full: false,
-    });
+    }, telemetry);
     const text = toolText(result);
     const detail = parseDecisionDetail(text);
     const valid = !result.isError
@@ -97,15 +97,15 @@ export function getFallbackLabel(error) {
     : "AI 선별 없이 검색 결과만 표시합니다.";
 }
 
-export async function collectCandidates(plan) {
+export async function collectCandidates(plan, telemetry = null) {
   const jobs = plan.keywords.flatMap((keyword) => plan.domains.map((domain) => ({ keyword, domain })));
   const searchResults = await mapWithConcurrency(jobs, config.searchConcurrency, async (job) => {
-    const result = await callTool("search_decisions", {
+    const result = await trackedCallTool("search_decisions", {
       domain: job.domain,
       query: job.keyword,
       display: config.searchDisplay,
       options: { search: 2 },
-    });
+    }, telemetry);
     return { ...job, result };
   });
   const byCaseNumber = new Map();
@@ -137,12 +137,12 @@ function normalizeLawName(value) {
   return String(value || "").replace(/\s+/gu, "").replace(/^대한민국헌법$/u, "헌법");
 }
 
-async function searchRelatedLaws(plan) {
+async function searchRelatedLaws(plan, telemetry = null) {
   const entries = await mapWithConcurrency(plan.law_names, config.searchConcurrency, async (lawName) => {
-    const result = await callTool("search_law", {
+    const result = await trackedCallTool("search_law", {
       query: lawName,
       display: config.lawSearchDisplay,
-    });
+    }, telemetry);
     if (result.isError) return null;
     const target = normalizeLawName(lawName);
     const candidate = parseLawSearchResults(toolText(result)).find(
@@ -168,9 +168,9 @@ async function searchRelatedLaws(plan) {
     });
 }
 
-export async function lookupQueryLawReferences(query) {
+export async function lookupQueryLawReferences(query, telemetry = null) {
   if (parseStatuteReferences(query).length === 0) return [];
-  return enrichLawReferences(query);
+  return enrichLawReferences(query, telemetry);
 }
 
 function closedWorldSelections(selection, candidates) {
@@ -190,9 +190,9 @@ function closedWorldSelections(selection, candidates) {
   return { selected, rejected };
 }
 
-export async function prepareCandidates(candidates) {
+export async function prepareCandidates(candidates, telemetry = null) {
   const initialCandidates = rankCandidates(candidates);
-  const previewEntries = await mapWithConcurrency(initialCandidates, config.searchConcurrency, previewCandidate);
+  const previewEntries = await mapWithConcurrency(initialCandidates, config.searchConcurrency, (candidate) => previewCandidate(candidate, telemetry));
   const previewCandidates = previewEntries.filter((entry) => !entry.error).map((entry) => entry.value);
   const rankedCandidates = rankCandidates(previewCandidates, { applyPreviewPenalty: true });
   return { rankedCandidates, candidatesWithPreview: rankedCandidates };
@@ -205,6 +205,7 @@ export async function finalizeSelection({
   selection,
   fallbackLabel,
   lawReferences,
+  telemetry = null,
 }) {
   const safeSelection = selection || { selected: [], intro: "" };
   const closedWorld = closedWorldSelections(safeSelection, candidatePool);
@@ -218,7 +219,7 @@ export async function finalizeSelection({
 
   const detailResults = await mapWithConcurrency(selectedCandidates, config.searchConcurrency, async (candidate) => {
     const prefetched = candidate.prefetched?.valid ? candidate.prefetched : null;
-    return lookupDecisionCandidate(candidate, candidate.domain, prefetched);
+    return lookupDecisionCandidate(candidate, candidate.domain, prefetched, telemetry);
   });
   const items = detailResults.map((entry, index) => ({
     ...(entry.value || {
@@ -244,37 +245,65 @@ export async function finalizeSelection({
 }
 
 export async function runDeterministicPipeline(query) {
+  const startedAt = Date.now();
+  const telemetry = {
+    geminiRequests: 0,
+    geminiRetryRequests: 0,
+    geminiInputTokens: 0,
+    geminiOutputTokens: 0,
+    mcpCallsTotal: 0,
+    mcpSearchCalls: 0,
+    mcpDetailCalls: 0,
+    elapsedMs: 0,
+  };
   let plan;
   let fallbackLabel = "";
   try {
-    plan = await generatePlan(query);
+    plan = await generatePlan(query, telemetry);
   } catch (error) {
     plan = fallbackPlan(query);
     fallbackLabel = getFallbackLabel(error);
   }
 
   const [rawCandidates, planLawReferences, queryLawReferences] = await Promise.all([
-    collectCandidates(plan),
-    searchRelatedLaws(plan),
-    lookupQueryLawReferences(query),
+    collectCandidates(plan, telemetry),
+    searchRelatedLaws(plan, telemetry),
+    lookupQueryLawReferences(query, telemetry),
   ]);
   const lawReferences = queryLawReferences.length > 0 ? queryLawReferences : planLawReferences;
-  const prepared = await prepareCandidates(rawCandidates);
+  const prepared = await prepareCandidates(rawCandidates, telemetry);
   let selection;
   try {
-    selection = await selectCandidates(query, prepared.candidatesWithPreview);
+    selection = await selectCandidates(query, prepared.candidatesWithPreview, telemetry);
   } catch (error) {
     selection = { selected: [], intro: "" };
     fallbackLabel = getFallbackLabel(error);
   }
-  return finalizeSelection({
+  const finalResult = await finalizeSelection({
     query,
     candidatesWithPreview: prepared.candidatesWithPreview,
     candidatePool: prepared.rankedCandidates,
     selection,
     fallbackLabel,
     lawReferences,
+    telemetry,
   });
+  telemetry.elapsedMs = Date.now() - startedAt;
+  return {
+    ...finalResult,
+    metrics: {
+      gemini_requests: telemetry.geminiRequests,
+      gemini_retry_requests: telemetry.geminiRetryRequests,
+      gemini_input_tokens: telemetry.geminiInputTokens,
+      gemini_output_tokens: telemetry.geminiOutputTokens,
+      mcp_calls_total: telemetry.mcpCallsTotal,
+      mcp_search_calls: telemetry.mcpSearchCalls,
+      mcp_detail_calls: telemetry.mcpDetailCalls,
+      elapsed_ms: telemetry.elapsedMs,
+      stop_reason: fallbackLabel ? "FALLBACK_ERROR" : "MODEL_FINAL",
+      fallback_used: Boolean(fallbackLabel),
+    },
+  };
 }
 
 export async function runNaturalPipeline(query) {

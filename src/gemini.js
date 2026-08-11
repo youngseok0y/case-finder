@@ -163,25 +163,44 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function recordGeminiAttempt(telemetry, response, callsUsed) {
+  if (!telemetry) return;
+  telemetry.geminiRequests = (telemetry.geminiRequests || 0) + callsUsed;
+  telemetry.geminiRetryRequests = (telemetry.geminiRetryRequests || 0) + Math.max(0, callsUsed - 1);
+  const usage = response?.usageMetadata || {};
+  telemetry.geminiInputTokens = (telemetry.geminiInputTokens || 0) + Number(usage.promptTokenCount || usage.inputTokenCount || 0);
+  telemetry.geminiOutputTokens = (telemetry.geminiOutputTokens || 0) + Number(usage.candidatesTokenCount || usage.outputTokenCount || 0);
+}
+
 async function generateContent(request, options = {}) {
   const ai = await getClient();
   await reserveGeminiCall(Date.now(), options);
   try {
     const response = await ai.models.generateContent(request);
+    recordGeminiAttempt(options.telemetry, response, 1);
     return options.returnMeta ? { response, callsUsed: 1 } : response;
   } catch (error) {
-    if (!isRateLimitError(error)) throw error;
+    if (!isRateLimitError(error)) {
+      recordGeminiAttempt(options.telemetry, null, 1);
+      throw error;
+    }
     await wait(config.geminiRetryDelayMs);
     const retryOptions = Number.isInteger(options.questionCalls)
       ? { ...options, questionCalls: options.questionCalls + 1 }
       : options;
     await reserveGeminiCall(Date.now(), retryOptions);
-    const response = await ai.models.generateContent(request);
-    return options.returnMeta ? { response, callsUsed: 2 } : response;
+    try {
+      const response = await ai.models.generateContent(request);
+      recordGeminiAttempt(options.telemetry, response, 2);
+      return options.returnMeta ? { response, callsUsed: 2 } : response;
+    } catch (retryError) {
+      recordGeminiAttempt(options.telemetry, null, 2);
+      throw retryError;
+    }
   }
 }
 
-export async function generateAgenticTurn(contents, observedCaseNumbers, questionCalls) {
+export async function generateAgenticTurn(contents, observedCaseNumbers, questionCalls, options = {}) {
   return generateContent({
     model: config.geminiModel,
     contents,
@@ -191,19 +210,25 @@ export async function generateAgenticTurn(contents, observedCaseNumbers, questio
       responseMimeType: "application/json",
       responseSchema: selectionSchema(observedCaseNumbers),
     },
-  }, { questionCalls, returnMeta: true });
+  }, {
+    questionCalls,
+    enforceQuestionLimit: options.enforceQuestionLimit,
+    rpdReserve: options.rpdReserve,
+    telemetry: options.telemetry,
+    returnMeta: true,
+  });
 }
 
-export async function generatePlan(query) {
+export async function generatePlan(query, telemetry = null) {
   const response = await generateContent({
     model: config.geminiModel,
     contents: fillPrompt(await getPrompt("plan"), { query }),
     config: { responseMimeType: "application/json", responseSchema: PLAN_SCHEMA },
-  });
+  }, { telemetry });
   return validatePlan(parseJsonResponse(response));
 }
 
-export async function selectCandidates(query, candidates) {
+export async function selectCandidates(query, candidates, telemetry = null) {
   if (candidates.length === 0) return { selected: [], intro: "" };
   const candidateText = candidates.map((candidate) => JSON.stringify({
     case_no: candidate.caseNumber,
@@ -219,6 +244,6 @@ export async function selectCandidates(query, candidates) {
       candidates: candidateText,
     }),
     config: { responseMimeType: "application/json", responseSchema: selectionSchema(candidates.map((candidate) => candidate.caseNumber)) },
-  });
+  }, { telemetry });
   return validateSelection(parseJsonResponse(response));
 }

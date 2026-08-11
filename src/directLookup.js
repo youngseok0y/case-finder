@@ -9,6 +9,18 @@ export function toolText(result) {
   return result?.content?.find((item) => item.type === "text")?.text || "";
 }
 
+export function recordMcpCall(telemetry, name) {
+  if (!telemetry) return;
+  telemetry.mcpCallsTotal = (telemetry.mcpCallsTotal || 0) + 1;
+  if (name === "search_decisions" || name === "search_law") telemetry.mcpSearchCalls = (telemetry.mcpSearchCalls || 0) + 1;
+  if (name === "get_decision_text" || name === "get_law_text") telemetry.mcpDetailCalls = (telemetry.mcpDetailCalls || 0) + 1;
+}
+
+export async function trackedCallTool(name, args, telemetry = null) {
+  recordMcpCall(telemetry, name);
+  return callTool(name, args);
+}
+
 function decodeBasicHtml(value) {
   return String(value || "")
     .replace(/<br\s*\/?>/gi, "\n")
@@ -187,15 +199,15 @@ export function parseStatuteReferences(referenceText) {
   return references;
 }
 
-export async function enrichLawReferences(referenceText) {
+export async function enrichLawReferences(referenceText, telemetry = null) {
   const references = parseStatuteReferences(referenceText).slice(0, config.lawMax);
   const enriched = [];
   for (const reference of references) {
     try {
-      const searchResult = await callTool("search_law", {
+      const searchResult = await trackedCallTool("search_law", {
         query: reference.lawName,
         display: 5,
-      });
+      }, telemetry);
       const candidates = parseLawSearchResults(toolText(searchResult));
       const candidateNames = [reference.lawName];
       if (reference.lawName === "헌법") candidateNames.push("대한민국헌법");
@@ -204,10 +216,10 @@ export async function enrichLawReferences(referenceText) {
         enriched.push({ ...reference, text: "", link: "" });
         continue;
       }
-      const lawResult = await callTool("get_law_text", {
+      const lawResult = await trackedCallTool("get_law_text", {
         mst: candidate.mst,
         jo: reference.article,
-      });
+      }, telemetry);
       const lawText = cleanLawArticleText(toolText(lawResult));
       if (lawResult.isError || !lawText || lawText.includes("[NOT_FOUND]")) {
         enriched.push({ ...reference, text: "", link: sanitizeApiLink(candidate.link, candidate.mst) || lawDetailLink(candidate.mst) });
@@ -225,12 +237,12 @@ export async function enrichLawReferences(referenceText) {
   return enriched;
 }
 
-export async function lookupDecisionCandidate(candidate, domain = "precedent", prefetched = null) {
-  const detailResult = prefetched?.result || await callTool("get_decision_text", {
+export async function lookupDecisionCandidate(candidate, domain = "precedent", prefetched = null, telemetry = null) {
+  const detailResult = prefetched?.result || await trackedCallTool("get_decision_text", {
     domain,
     id: candidate.id,
     full: false,
-  });
+  }, telemetry);
   const detailText = prefetched?.text || toolText(detailResult);
   const detail = prefetched?.detail || parseDecisionDetail(detailText);
   const detailValid = !detailResult?.isError
@@ -249,7 +261,7 @@ export async function lookupDecisionCandidate(candidate, domain = "precedent", p
     type: detail.type || candidate.type,
     link: sanitizeApiLink(candidate.link, candidate.id),
     detail,
-    lawReferences: detailValid ? await enrichLawReferences(detail.sections.참조조문 || "") : [],
+    lawReferences: detailValid ? await enrichLawReferences(detail.sections.참조조문 || "", telemetry) : [],
   };
 }
 

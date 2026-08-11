@@ -60,13 +60,19 @@ export function reserveGeminiCall(now = Date.now(), options = {}) {
   return withWriteLock(async () => {
     const usage = await readUsage();
     const recentCalls = usage.recentCalls.filter((timestamp) => timestamp > now - 60_000);
-    if (usage.callsToday >= config.geminiRpdLimit) {
-      throw new GeminiLimitExceededError("일일 한도");
+    const reserve = Number.isInteger(options.rpdReserve)
+      ? Math.min(config.geminiRpdLimit, Math.max(0, options.rpdReserve))
+      : 0;
+    const dailyLimit = config.geminiRpdLimit - reserve;
+    if (usage.callsToday >= dailyLimit) {
+      throw new GeminiLimitExceededError(reserve > 0 ? "일일 reserve" : "일일 한도");
     }
     if (recentCalls.length >= config.geminiRpmLimit) {
       throw new GeminiLimitExceededError("분당 한도");
     }
-    if (Number.isInteger(options.questionCalls) && options.questionCalls >= config.agenticCallMax) {
+    if (options.enforceQuestionLimit !== false
+      && Number.isInteger(options.questionCalls)
+      && options.questionCalls >= config.agenticCallMax) {
       throw new GeminiLimitExceededError("질문당 한도");
     }
     const nextUsage = {

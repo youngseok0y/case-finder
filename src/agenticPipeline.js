@@ -256,22 +256,109 @@ function serializeSelection(selection) {
   };
 }
 
+function canonicalize(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalize(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function responseTokenCounts(response) {
+  const usage = response?.usageMetadata || {};
+  return {
+    inputTokens: Number(usage.promptTokenCount || usage.inputTokenCount || 0),
+    outputTokens: Number(usage.candidatesTokenCount || usage.outputTokenCount || 0),
+  };
+}
+
+function decisionNumbersFromResult(name, result) {
+  const text = toolText(result);
+  if (name === "search_decisions") return parseDecisionSearchResults(text).map((item) => item.caseNumber).filter(Boolean);
+  if (name === "get_decision_text") {
+    const caseNumber = parseDecisionDetail(text).caseNumber;
+    return caseNumber ? [caseNumber] : [];
+  }
+  return [];
+}
+
+function createAgenticTrace() {
+  return {
+    events: [],
+    metrics: {
+      geminiRequests: 0,
+      geminiRetryRequests: 0,
+      geminiInputTokens: 0,
+      geminiOutputTokens: 0,
+      mcpCallsTotal: 0,
+      mcpSearchCalls: 0,
+      mcpDetailCalls: 0,
+      elapsedMs: 0,
+    },
+  };
+}
+
+function publicAgentMetrics(metrics, stopReason, fallbackUsed) {
+  if (!metrics) return null;
+  return {
+    gemini_requests: metrics.geminiRequests || 0,
+    gemini_retry_requests: metrics.geminiRetryRequests || 0,
+    gemini_input_tokens: metrics.geminiInputTokens || 0,
+    gemini_output_tokens: metrics.geminiOutputTokens || 0,
+    mcp_calls_total: metrics.mcpCallsTotal || 0,
+    mcp_search_calls: metrics.mcpSearchCalls || 0,
+    mcp_detail_calls: metrics.mcpDetailCalls || 0,
+    elapsed_ms: metrics.elapsedMs || 0,
+    stop_reason: stopReason,
+    fallback_used: Boolean(fallbackUsed),
+  };
+}
+
 export async function runAgenticSearch(query) {
   const contents = [{ role: "user", parts: [{ text: query }] }];
   const candidates = new Map();
+  const toolCache = new Map();
+  const seenSearchCalls = new Set();
+  const seenDetailCalls = new Set();
+  const trace = createAgenticTrace();
+  const startedAt = Date.now();
+  const openHorizon = config.agenticMode === "open";
   let selection = null;
   let questionCalls = 0;
-  let stopReason = "call_limit";
+  let stopReason = openHorizon ? "SAFETY_WATCHDOG_STOP" : "QUESTION_CALL_LIMIT";
+  let noNewEvidenceTurns = 0;
 
   try {
-    while (questionCalls < config.agenticCallMax) {
-      const turn = await generateAgenticTurn(contents, [...candidates.keys()], questionCalls);
+    while (true) {
+      if (Date.now() - startedAt >= config.aoWallClockMaxMs) {
+        stopReason = "SAFETY_WATCHDOG_STOP";
+        break;
+      }
+      if (!openHorizon && questionCalls >= config.agenticCallMax) {
+        stopReason = "QUESTION_CALL_LIMIT";
+        break;
+      }
+
+      const turn = await generateAgenticTurn(
+        contents,
+        [...candidates.keys()],
+        questionCalls,
+        {
+          enforceQuestionLimit: !openHorizon,
+          rpdReserve: openHorizon ? config.aoRpdReserve : 0,
+        },
+      );
       questionCalls += turn.callsUsed;
+      trace.metrics.geminiRequests += turn.callsUsed;
+      trace.metrics.geminiRetryRequests += Math.max(0, turn.callsUsed - 1);
+      const tokenCounts = responseTokenCounts(turn.response);
+      trace.metrics.geminiInputTokens += tokenCounts.inputTokens;
+      trace.metrics.geminiOutputTokens += tokenCounts.outputTokens;
       const response = turn.response;
       const functionCalls = response.functionCalls || [];
       if (functionCalls.length === 0) {
         selection = parseSelectionResponse(response);
-        stopReason = "completed";
+        stopReason = "MODEL_FINAL";
         break;
       }
 
@@ -280,32 +367,88 @@ export async function runAgenticSearch(query) {
         parts: functionCalls.map((call) => ({ functionCall: call })),
       };
       contents.push(modelTurn);
-      const toolResults = await Promise.all(functionCalls.map(async (call) => {
-        const result = await executeAgenticTool(call.name, call.args);
-        observeToolResult(candidates, call.name, result, call.args || {});
-        return { call, result };
-      }));
+      const candidatesBeforeTurn = candidates.size;
+      const evidenceCallsBeforeTurn = seenSearchCalls.size + seenDetailCalls.size;
+      const toolResults = [];
+      for (const [callIndex, call] of functionCalls.entries()) {
+        const callStartedAt = Date.now();
+        const candidatesBeforeCall = candidates.size;
+        const args = call.args || {};
+        const cacheKey = canonicalize({ name: call.name, args });
+        const cacheHit = toolCache.has(cacheKey);
+        const result = cacheHit ? toolCache.get(cacheKey) : await executeAgenticTool(call.name, args);
+        if (!cacheHit) {
+          toolCache.set(cacheKey, result);
+          trace.metrics.mcpCallsTotal += 1;
+          if (call.name === "search_decisions" || call.name === "search_law") trace.metrics.mcpSearchCalls += 1;
+          if (call.name === "get_decision_text" || call.name === "get_law_text") trace.metrics.mcpDetailCalls += 1;
+        }
+        observeToolResult(candidates, call.name, result, args);
+        const resultText = toolText(result);
+        const isUsable = !result?.isError
+          && !resultText.includes("[NOT_FOUND]")
+          && !resultText.includes("[HALLUCINATION_DETECTED]");
+        if (!cacheHit && (call.name === "search_decisions" || call.name === "search_law")) {
+          seenSearchCalls.add(cacheKey);
+        }
+        if (!cacheHit && (call.name === "get_decision_text" || call.name === "get_law_text")) {
+          seenDetailCalls.add(cacheKey);
+        }
+        const returnedCaseNumbers = decisionNumbersFromResult(call.name, result);
+        trace.events.push({
+          question_id: query,
+          arm: openHorizon ? "AO" : "A6",
+          gemini_request_index: questionCalls,
+          tool_call_index: trace.metrics.mcpCallsTotal,
+          tool: call.name,
+          query: args.query || "",
+          returned_case_numbers: returnedCaseNumbers,
+          new_case_number_count: Math.max(0, candidates.size - candidatesBeforeCall),
+          opened_case_number: call.name === "get_decision_text" ? returnedCaseNumbers[0] || null : null,
+          candidate_gold_seen: null,
+          selected_gold_seen: null,
+          input_tokens: callIndex === 0 ? tokenCounts.inputTokens : 0,
+          output_tokens: callIndex === 0 ? tokenCounts.outputTokens : 0,
+          elapsed_ms: Date.now() - callStartedAt,
+          cache_hit: cacheHit,
+        });
+        toolResults.push({ call, result });
+      }
       contents.push({
         role: "user",
         parts: toolResults.map(({ call, result }) => functionResponsePart(call, result)),
       });
+
+      const newEvidence = candidates.size > candidatesBeforeTurn
+        || seenSearchCalls.size + seenDetailCalls.size > evidenceCallsBeforeTurn;
+      noNewEvidenceTurns = newEvidence ? 0 : noNewEvidenceTurns + 1;
+      if (openHorizon && noNewEvidenceTurns >= config.aoNoNewEvidenceTurns) {
+        stopReason = "NO_NEW_EVIDENCE";
+        break;
+      }
     }
   } catch (error) {
     error.observedCandidates = [...candidates.values()];
     error.observedSelection = selection;
-    error.agentStopReason = "error";
+    error.agentStopReason = error?.code === "GEMINI_LIMIT_EXCEEDED" && /reserve|일일/u.test(String(error.reason || error.message))
+      ? "RPD_RESERVE_STOP"
+      : "ERROR";
     error.agentCallsUsed = questionCalls;
+    trace.metrics.elapsedMs = Date.now() - startedAt;
+    error.agentTrace = trace;
     throw error;
   }
 
+  trace.metrics.elapsedMs = Date.now() - startedAt;
   if (!selection) return {
     selection: { selected: [], intro: "" },
     candidates: [...candidates.values()],
     limitReached: true,
     stopReason,
     callsUsed: questionCalls,
+    trace,
   };
-  return { selection, candidates: [...candidates.values()], limitReached: false, stopReason, callsUsed: questionCalls };
+  return { selection, candidates: [...candidates.values()], limitReached: false, stopReason, callsUsed: questionCalls, trace };
 }
 
 export async function runAgenticPipeline(query) {
@@ -313,30 +456,40 @@ export async function runAgenticPipeline(query) {
   let fallbackLabel = "";
   let rawAgentCandidates = [];
   let rawAgentSelection = null;
-  let agentStopReason = "error";
+  let agentStopReason = "ERROR";
+  let agentTrace = null;
+  let fallbackCandidateSet = [];
   const fallbackReasons = [];
   try {
     search = await runAgenticSearch(query);
     rawAgentCandidates = search.candidates;
     rawAgentSelection = search.selection;
     agentStopReason = search.stopReason;
+    agentTrace = search.trace;
   } catch (error) {
     const observedCandidates = error.observedCandidates || [];
     rawAgentCandidates = observedCandidates;
     rawAgentSelection = error.observedSelection || null;
-    agentStopReason = error.agentStopReason || "error";
+    agentStopReason = error.agentStopReason || "ERROR";
+    agentTrace = error.agentTrace || null;
     const fallbackCandidates = observedCandidates.length > 0
       ? observedCandidates
       : await collectCandidates(fallbackPlan(query));
-    if (observedCandidates.length === 0) fallbackReasons.push("deterministic_candidates");
+    if (observedCandidates.length === 0) {
+      fallbackCandidateSet = fallbackCandidates;
+      fallbackReasons.push("deterministic_candidates");
+    }
     search = { selection: { selected: [], intro: "" }, candidates: fallbackCandidates };
     fallbackLabel = getFallbackLabel(error);
   }
 
   if (search.limitReached) {
-    fallbackLabel = getFallbackLabel(new GeminiLimitExceededError("질문당 한도"));
+    if (agentStopReason === "QUESTION_CALL_LIMIT") {
+      fallbackLabel = getFallbackLabel(new GeminiLimitExceededError("질문당 한도"));
+    }
     if (search.candidates.length === 0) {
       search.candidates = await collectCandidates(fallbackPlan(query));
+      fallbackCandidateSet = search.candidates;
       fallbackReasons.push("deterministic_candidates");
     }
   }
@@ -360,6 +513,10 @@ export async function runAgenticPipeline(query) {
       agent_stop_reason: agentStopReason,
       fallback_used: fallbackReasons.length > 0,
       fallback_reason: [...new Set(fallbackReasons)],
+      raw_agent_candidate_set: rawAgentCandidates.map(serializeCandidate),
+      fallback_candidate_set: fallbackCandidateSet.map(serializeCandidate),
+      agent_metrics: publicAgentMetrics(agentTrace?.metrics, agentStopReason, fallbackReasons.length > 0),
+      agent_events: agentTrace?.events || [],
       final_product_output: null,
     };
   }
@@ -379,6 +536,10 @@ export async function runAgenticPipeline(query) {
     agent_stop_reason: agentStopReason,
     fallback_used: fallbackReasons.length > 0,
     fallback_reason: [...new Set(fallbackReasons)],
+    raw_agent_candidate_set: rawAgentCandidates.map(serializeCandidate),
+    fallback_candidate_set: fallbackCandidateSet.map(serializeCandidate),
+    agent_metrics: publicAgentMetrics(agentTrace?.metrics, agentStopReason, fallbackReasons.length > 0),
+    agent_events: agentTrace?.events || [],
     final_product_output: null,
   };
 }

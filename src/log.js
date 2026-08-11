@@ -48,10 +48,14 @@ export async function logAgenticExperiment(query, result) {
   const record = {
     query: safeQuery,
     raw_agent_candidates: result.raw_agent_candidates || [],
+    raw_agent_candidate_set: result.raw_agent_candidate_set || result.raw_agent_candidates || [],
     raw_agent_selection: result.raw_agent_selection || null,
     agent_stop_reason: result.agent_stop_reason || "unknown",
     fallback_used: Boolean(result.fallback_used),
     fallback_reason: result.fallback_reason || [],
+    fallback_candidate_set: result.fallback_candidate_set || [],
+    agent_metrics: result.agent_metrics || null,
+    agent_events: result.agent_events || [],
     final_product_output: result.final_product_output || null,
   };
   try {
