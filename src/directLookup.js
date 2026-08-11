@@ -2,7 +2,7 @@ import { config } from "../config.js";
 import { callTool } from "./mcpClient.js";
 import { caseNumberIncludes, normalizeCaseNumber } from "./router.js";
 
-const DETAIL_SECTIONS = ["판시사항", "판결요지", "결정요지", "참조조문", "참조판례", "전문"];
+const DETAIL_SECTIONS = ["판시사항", "판결요지", "결정요지", "재결주문", "재결요지", "참조조문", "참조판례", "이유", "전문"];
 const ARTICLE_PATTERN = /(?:제)?\d+조(?:의\d+)?(?:제\d+항)?(?:제\d+호)?/g;
 
 export function toolText(result) {
@@ -53,13 +53,16 @@ export function parseDecisionSearchResults(rawText) {
       continue;
     }
     if (!current) continue;
-    const field = line.match(/^\s*(사건번호|법원|선고일|종국일|사건종류|판결유형|링크)\s*:\s*(.*?)\s*$/);
+    const field = line.match(/^\s*(사건번호|법원|선고일|종국일|종국일자|의결일|의결일자|사건종류|판결유형|링크)\s*:\s*(.*?)\s*$/);
     if (!field) continue;
     const keyMap = {
       사건번호: "caseNumber",
       법원: "court",
       선고일: "date",
       종국일: "date",
+      종국일자: "date",
+      의결일: "date",
+      의결일자: "date",
       사건종류: "caseType",
       판결유형: "type",
       링크: "link",
@@ -110,7 +113,11 @@ export function parseDecisionDetail(rawText) {
   return {
     caseNumber: parseLabeledField(text, "사건번호"),
     court: parseLabeledField(text, "법원"),
-    date: parseLabeledField(text, "선고일") || parseLabeledField(text, "종국일자"),
+    date: parseLabeledField(text, "선고일")
+      || parseLabeledField(text, "종국일자")
+      || parseLabeledField(text, "종국일")
+      || parseLabeledField(text, "의결일자")
+      || parseLabeledField(text, "의결일"),
     caseType: parseLabeledField(text, "사건종류"),
     type: parseLabeledField(text, "판결유형"),
     sections,
@@ -118,7 +125,7 @@ export function parseDecisionDetail(rawText) {
   };
 }
 
-function parseLawSearchResults(rawText) {
+export function parseLawSearchResults(rawText) {
   const text = decodeBasicHtml(rawText);
   const lines = text.split("\n");
   const results = [];
@@ -142,7 +149,7 @@ function parseLawSearchResults(rawText) {
   return results;
 }
 
-function lawDetailLink(mst) {
+export function lawDetailLink(mst) {
   return /^\d+$/.test(String(mst || ""))
     ? `https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=${encodeURIComponent(mst)}`
     : "";
@@ -247,9 +254,11 @@ export async function lookupDecisionCandidate(candidate, domain = "precedent", p
 }
 
 async function lookupOne(caseRequest) {
+  const options = { caseNumber: caseRequest.caseNumber };
+  if (caseRequest.domain === "precedent") options.search = 2;
   const searchResult = await callTool("search_decisions", {
     domain: caseRequest.domain,
-    query: caseRequest.caseNumber,
+    options,
     display: 100,
   });
   const searchText = toolText(searchResult);

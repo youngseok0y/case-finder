@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Fable 규격의 법제처 근거 기반 판례 검색기",
   "engines": {
-    "node": "24.14.0"
+    "node": ">=24.14.0 <25"
   },
   "scripts": {
     "start": "node src/server.js",

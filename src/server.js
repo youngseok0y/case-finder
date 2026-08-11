@@ -4,7 +4,7 @@ import path from "node:path";
 import { config, EXPECTED_NODE_VERSION, ROOT_DIR } from "../config.js";
 import { closeMcp, getMcpStatus, startMcp } from "./mcpClient.js";
 import { lookupDirect } from "./directLookup.js";
-import { logError, logInfo } from "./log.js";
+import { logAgenticExperiment, logError, logInfo } from "./log.js";
 import { runNaturalPipeline } from "./nlPipeline.js";
 import { renderResults } from "./renderer.js";
 import { routeQuery } from "./router.js";
@@ -20,6 +20,25 @@ function sendJson(response, statusCode, payload) {
     "content-length": Buffer.byteLength(body),
   });
   response.end(body);
+}
+
+function attachAgenticFinalOutput(result) {
+  if (!Object.prototype.hasOwnProperty.call(result, "raw_agent_candidates")) return result;
+  return {
+    ...result,
+    final_product_output: {
+      route: result.route,
+      query: result.query,
+      selected: result.selected || [],
+      items: (result.items || []).map((item) => ({
+        caseNumber: item.caseNumber,
+        status: item.status,
+        match: item.match,
+        link: item.link,
+      })),
+      validationFailures: result.validationFailures || [],
+    },
+  };
 }
 
 async function readBody(request) {
@@ -74,7 +93,8 @@ async function handle(request, response) {
       return;
     }
     const natural = await runNaturalPipeline(query);
-    const validated = await validateNaturalResult(natural);
+    const validated = attachAgenticFinalOutput(await validateNaturalResult(natural));
+    if (config.pipelineMode === "agentic") await logAgenticExperiment(query, validated);
     sendJson(response, 200, {
       ok: true,
       stage: config.pipelineMode === "agentic" ? "M4" : "M3",

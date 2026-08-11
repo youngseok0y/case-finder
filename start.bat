@@ -7,9 +7,10 @@ if exist ".env" (
   for /f "usebackq tokens=1,* delims==" %%A in (".env") do if "%%A"=="PORT" set "APP_PORT=%%B"
 )
 
-node --version | findstr /r /c:"v24\.14\.0" >nul
+for /f "tokens=1" %%V in ('node --version') do set "NODE_VERSION=%%V"
+powershell.exe -NoProfile -Command "$v = [version]'!NODE_VERSION:~1!'; if ($v -ge [version]'24.14.0' -and $v -lt [version]'25.0.0') { exit 0 } else { exit 1 }"
 if errorlevel 1 (
-  echo Node.js v24.14.0 is required.
+  echo Node.js >=24.14.0 and ^<25 is required.
   node --version
   pause
   exit /b 1
@@ -59,9 +60,18 @@ exit /b 0
 :startServer
 call :findPortPid
 if defined PORT_PID (
-  echo Port %APP_PORT% is already in use by process %PORT_PID%.
-  echo The launcher did not start another server.
-  exit /b 1
+  echo Existing process !PORT_PID! is using port %APP_PORT%.
+  echo Stopping existing process...
+  taskkill /PID !PORT_PID! /T /F >nul 2>&1
+  if errorlevel 1 (
+    echo Failed to stop process !PORT_PID!.
+    exit /b 1
+  )
+  call :waitForPortFree
+  if errorlevel 1 (
+    echo Port %APP_PORT% is still in use after stopping the existing process.
+    exit /b 1
+  )
 )
 
 echo Starting server...
@@ -81,6 +91,16 @@ for /l %%S in (1,1,60) do (
 echo Server did not open port %APP_PORT% within 60 seconds.
 echo Check logs/server-error.log.
 exit /b 1
+
+:waitForPortFree
+for /l %%S in (1,1,10) do (
+  call :findPortPid
+  if not defined PORT_PID exit /b 0
+  powershell.exe -NoProfile -Command "Start-Sleep -Seconds 1"
+)
+call :findPortPid
+if defined PORT_PID exit /b 1
+exit /b 0
 
 :stopServer
 if not defined SERVER_PID (

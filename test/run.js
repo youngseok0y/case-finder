@@ -19,6 +19,7 @@ const mode = option("mode", process.env.PIPELINE_MODE || "unknown");
 const repeat = Math.max(1, Number.parseInt(option("repeat", "1"), 10) || 1);
 const includeNatural = args.has("--include-natural");
 const timeoutMs = Math.max(5_000, Number.parseInt(option("timeout-ms", "120000"), 10) || 120_000);
+const idFilter = new Set(option("ids", "").split(",").map((value) => value.trim()).filter(Boolean));
 
 function fail(message) {
   throw new Error(message);
@@ -123,7 +124,9 @@ function validatePayload(testCase, payload) {
   return { selected: selectedSignature(result), itemCount: items.length };
 }
 
-const selectedCases = golden.cases.filter((testCase) => includeNatural || testCase.kind === "direct");
+const selectedCases = golden.cases.filter((testCase) =>
+  (includeNatural || testCase.kind === "direct")
+  && (idFilter.size === 0 || idFilter.has(testCase.id)));
 const skipped = golden.cases.length - selectedCases.length;
 const results = [];
 let failures = 0;

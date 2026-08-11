@@ -50,9 +50,9 @@ const AGENTIC_FUNCTIONS = [
     parameters: {
       type: Type.OBJECT,
       properties: {
-        domain: { type: Type.STRING, enum: ["precedent", "constitutional"] },
+        domain: { type: Type.STRING, enum: ["precedent", "constitutional", "admin_appeal"] },
         query: { type: Type.STRING },
-        display: { type: Type.INTEGER, minimum: 1, maximum: 5 },
+        display: { type: Type.INTEGER, minimum: 1, maximum: config.searchDisplay },
       },
       required: ["domain", "query"],
     },
@@ -87,7 +87,7 @@ const AGENTIC_FUNCTIONS = [
     parameters: {
       type: Type.OBJECT,
       properties: {
-        domain: { type: Type.STRING, enum: ["precedent", "constitutional"] },
+        domain: { type: Type.STRING, enum: ["precedent", "constitutional", "admin_appeal"] },
         id: { type: Type.STRING },
       },
       required: ["domain", "id"],

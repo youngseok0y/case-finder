@@ -30,7 +30,7 @@
 - 본문검색 결과에서 기대 사건이 12/56위 또는 25/100위에 위치하는 사례 존재
 - 헌재 도메인에서 `간통죄`, `양심적 병역거부` 검색이 0건이 되는 사례 존재
 
-현재 결정론 경로는 [`src/nlPipeline.js`](../src/nlPipeline.js)의 `search_decisions` 호출에 `options: { search: 2 }`를 전달합니다. 반면 [`src/agenticPipeline.js`](../src/agenticPipeline.js)는 현재 검색 호출에서 이 옵션을 전달하지 않습니다.
+결정론 경로와 에이전틱 경로 모두 판례 도메인의 `search_decisions` 호출에 `options: { search: 2 }`를 전달합니다. 헌재·행정심판 도메인은 설치된 MCP 핸들러가 동일 옵션을 지원하지 않으므로 전달하지 않습니다.
 
 헌재 핸들러도 설치된 4.9.6의 `build/tools/constitutional-decisions.js`에서 `query`, `caseNumber`, `display`, `page`, `sort`만 API 파라미터로 전달하며 `search=2`를 지원하지 않습니다.
 
@@ -52,7 +52,7 @@
 
 현재 [`config.js`](../config.js)의 `searchDisplay`는 20입니다. 본문검색에서 정답이 25위에 있으면 `search=2`를 강제해도 후보 풀에 들어오지 않습니다. `candidateMax`는 별도로 20이므로 `searchDisplay`를 50으로 늘려도 Gemini에 전달되는 최종 후보 상한과 Gemini 호출 수는 그대로 유지됩니다.
 
-다만 에이전틱 경로는 도구 결과를 `agenticToolResultMaxChars`로 잘라 전달하므로, `searchDisplay` 상향 효과가 결정론 경로와 동일하지 않을 수 있습니다.
+에이전틱 경로는 검색 목록과 판례 상세를 구조화해 전달하므로, 검색 결과 뒤쪽의 provider ID가 문자 수 절단으로 사라지지 않습니다.
 
 ## 부차 요인 점검
 
@@ -68,7 +68,7 @@
 
 1. `searchDisplay`를 20에서 50으로 상향
 2. 결정론 골든 세트를 `--include-natural --repeat=3`으로 재검증
-3. 에이전틱 판례 검색에 `options.search=2`를 전달
+3. 에이전틱 검색 결과를 구조화하고 raw 후보·선택·fallback 결과를 별도 기록
 4. `searchDisplay` 50과 100의 회수율·응답시간을 비교
 
 ### 2단계: 계획·랭킹 보완

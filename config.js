@@ -4,9 +4,10 @@ import { fileURLToPath } from "node:url";
 
 const currentFile = fileURLToPath(import.meta.url);
 const rootDir = path.dirname(currentFile);
+const configuredSearchDisplay = Number.parseInt(process.env.SEARCH_DISPLAY || "20", 10);
 
 export const ROOT_DIR = rootDir;
-export const EXPECTED_NODE_VERSION = "24.14.0";
+export const EXPECTED_NODE_VERSION = ">=24.14.0 <25";
 
 export const config = Object.freeze({
   port: Number.parseInt(process.env.PORT || "3300", 10),
@@ -20,9 +21,10 @@ export const config = Object.freeze({
   geminiRpdLimit: 450,
   geminiRetryDelayMs: 20_000,
   agenticCallMax: Number.parseInt(process.env.AGENTIC_CALL_MAX || "6", 10),
-  agenticToolResultMaxChars: Number.parseInt(process.env.AGENTIC_TOOL_RESULT_MAX_CHARS || "4000", 10),
   searchConcurrency: 5,
-  searchDisplay: 20,
+  searchDisplay: Number.isInteger(configuredSearchDisplay)
+    ? Math.min(100, Math.max(1, configuredSearchDisplay))
+    : 20,
   lawSearchDisplay: 5,
   candidateMax: 20,
   previewMissingPenalty: 2,

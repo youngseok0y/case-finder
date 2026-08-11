@@ -5,6 +5,10 @@ Return JSON matching the supplied response schema exactly.
 
 Requirements:
 - keywords: 8 to 12 short Korean search expressions that could retrieve relevant Korean precedents.
+- Mix short single concepts with compact 2-4 word legal phrases likely to appear verbatim in a 판시사항 or 판결요지.
+- When the query describes a distinctive fact pattern, include its distinctive legal phrase or fact combination, not only broad words such as "위법" or "가능".
+- Keep each expression short because the law API combines space-separated terms with AND semantics; avoid copying the full user sentence.
+- For constitutional or administrative questions, include the statute/article wording or the distinctive issue phrase from the query when present.
 - law_names: 0 to 5 Korean statute names that may be relevant. Use names only when supported by the query.
 - domains: one or more of precedent, constitutional, and admin_appeal.
 - Do not include explanations outside the JSON object.

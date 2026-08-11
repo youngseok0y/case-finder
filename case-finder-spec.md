@@ -31,7 +31,7 @@
 
 | 구성요소 | 선택 | 고정 방법 |
 |---|---|---|
-| 런타임 | Node.js 24.14.0 | `package.json`의 `engines.node`에 정확 버전 명시 + `.nvmrc` |
+| 런타임 | Node.js `>=24.14.0 <25` | `package.json`의 `engines.node`에 허용 범위 명시 |
 | MCP 서버 | `korean-law-mcp` (npm, chrisryugj) — 로컬 stdio 구동 | `package.json` dependencies에 **정확 버전**(예: `"korean-law-mcp": "4.x.y"` — ^, ~ 금지). §18-A 참조 |
 | MCP 클라이언트 | `@modelcontextprotocol/sdk` | 정확 버전 고정 |
 | LLM | Gemini **3.5 Flash-Lite** (`gemini-3.5-flash-lite`), `@google/genai` SDK | 모델 문자열을 `config.js` 상수로 고정. SDK 정확 버전 고정 |
@@ -193,7 +193,8 @@ Gemini 함수 호출(function calling) 루프로 구현한다.
 - **루프**: 사용자 질문 + 도구 선언 + `prompts/agent.txt`(시스템 지침)로 시작. 모델이 함수 호출을 반환하면 앱이 mcpClient로 실행해 결과를 돌려준다. 모델이 최종 답(아래 스키마)을 반환하거나 질문당 Gemini 요청 수가 `AGENTIC_CALL_MAX`(기본 6)에 도달하면 종료한다.
 - **최종 답 스키마**: 모드 D의 호출 ②와 동일한 JSON(`selected[{case_no, match}]` + `intro`). 자유 서술형 최종 답은 받지 않는다.
 - **닫힌 선택의 적용 방식**: 앱은 루프 동안 도구 결과에 실제로 등장한 사건번호를 전부 수집해 두고, 이 집합을 validator에 후보 집합으로 넘긴다. 최종 답의 사건번호가 이 집합 밖에 있으면 제거된다(A2·A3).
-- **도구 결과 절단**: 각 도구 결과는 모델에 되돌려주기 전 `AGENTIC_TOOL_RESULT_MAX_CHARS`(기본 4,000자)로 절단한다 — TPM 방어. 최종 출력의 원문 필드는 어차피 6.1 단계 5와 동일하게 앱이 재조회한 원문을 쓴다(A1).
+- **도구 결과 구조화**: 검색 도구 결과는 `total`과 `items[{id, caseNumber, title, court, date, ...}]` 구조로 전달하고, 판례 상세는 `caseNumber`, 메타데이터와 `판시사항`·`판결요지`·`결정요지`·`재결요지` 등 필요한 요지만 구조화해 전달한다. 원시 MCP 문자열을 임의의 문자 수로 절단하지 않으며, 최종 출력의 원문 필드는 6.1 단계 5와 동일하게 앱이 재조회한 원문을 쓴다(A1).
+- **실험 기록 분리**: 에이전틱 결과에는 `raw_agent_candidates`, `raw_agent_selection`, `agent_stop_reason`, `fallback_used`, `final_product_output`을 별도로 기록한다. `fallback_used`가 참인 경우 결정론 후보 폴백과 상위 랭킹 채움 사유를 구분한다. 에이전틱 arm 간에는 이 tool surface를 공유하고 질문당 호출 상한만 설정으로 다르게 한다.
 - **상한 도달 시**: 최종 답 없이 상한에 닿으면, 루프 중 수집된 검색 결과에 6.1 단계 3의 결정론 랭킹을 적용해 A7 폴백 형식으로 출력한다.
 - **prompts/agent.txt 요지**: "도구 결과에 없는 판례·조문을 절대 언급하지 마라. 찾지 못했으면 selected를 비워라. 검색어를 바꿔가며 여러 번 검색하라. 판단·자문하지 마라."
 

@@ -4,9 +4,12 @@ import { generatePlan, selectCandidates } from "./gemini.js";
 import {
   lookupDecisionCandidate,
   enrichLawReferences,
+  lawDetailLink,
   parseDecisionDetail,
+  parseLawSearchResults,
   parseStatuteReferences,
   parseDecisionSearchResults,
+  sanitizeApiLink,
   toolText,
 } from "./directLookup.js";
 import { caseNumberIncludes, caseNumberKey, normalizeCaseNumber } from "./router.js";
@@ -130,11 +133,39 @@ export async function collectCandidates(plan) {
   return [...byCaseNumber.values()];
 }
 
+function normalizeLawName(value) {
+  return String(value || "").replace(/\s+/gu, "").replace(/^대한민국헌법$/u, "헌법");
+}
+
 async function searchRelatedLaws(plan) {
-  return mapWithConcurrency(plan.law_names, config.searchConcurrency, async (lawName) => callTool("search_law", {
-    query: lawName,
-    display: config.lawSearchDisplay,
-  }));
+  const entries = await mapWithConcurrency(plan.law_names, config.searchConcurrency, async (lawName) => {
+    const result = await callTool("search_law", {
+      query: lawName,
+      display: config.lawSearchDisplay,
+    });
+    if (result.isError) return null;
+    const target = normalizeLawName(lawName);
+    const candidate = parseLawSearchResults(toolText(result)).find(
+      (item) => normalizeLawName(item.title) === target,
+    );
+    if (!candidate || (!candidate.mst && !candidate.link)) return null;
+    return {
+      lawName: candidate.title,
+      article: "",
+      text: "",
+      link: sanitizeApiLink(candidate.link, candidate.mst) || lawDetailLink(candidate.mst),
+    };
+  });
+  const seen = new Set();
+  return entries
+    .filter((entry) => !entry.error && entry.value)
+    .map((entry) => entry.value)
+    .filter((reference) => {
+      const key = normalizeLawName(reference.lawName);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 export async function lookupQueryLawReferences(query) {
@@ -222,11 +253,12 @@ export async function runDeterministicPipeline(query) {
     fallbackLabel = getFallbackLabel(error);
   }
 
-  const [rawCandidates, , lawReferences] = await Promise.all([
+  const [rawCandidates, planLawReferences, queryLawReferences] = await Promise.all([
     collectCandidates(plan),
     searchRelatedLaws(plan),
     lookupQueryLawReferences(query),
   ]);
+  const lawReferences = queryLawReferences.length > 0 ? queryLawReferences : planLawReferences;
   const prepared = await prepareCandidates(rawCandidates);
   let selection;
   try {

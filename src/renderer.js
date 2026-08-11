@@ -30,7 +30,7 @@ function textBlock(value, fallback = "법령센터 원문 참조") {
 }
 
 function renderLawReference(reference) {
-  const label = `${reference.lawName} ${reference.article}`;
+  const label = [reference.lawName, reference.article].filter(Boolean).join(" ");
   const content = reference.text ? textBlock(reference.text) : "법령센터 원문 참조";
   const href = safeHref(reference.link, "/LSW/lsInfoP.do");
   const title = href

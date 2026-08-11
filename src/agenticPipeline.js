@@ -2,6 +2,7 @@ import { config } from "../config.js";
 import { callTool } from "./mcpClient.js";
 import {
   parseDecisionDetail,
+  parseLawSearchResults,
   parseDecisionSearchResults,
   toolText,
 } from "./directLookup.js";
@@ -17,7 +18,7 @@ import {
   prepareCandidates,
 } from "./nlPipeline.js";
 
-const DECISION_DOMAINS = new Set(["precedent", "constitutional"]);
+const DECISION_DOMAINS = new Set(["precedent", "constitutional", "admin_appeal"]);
 const TOOL_NAMES = new Set(["search_decisions", "search_law", "get_law_text", "get_decision_text"]);
 
 function toolError(message) {
@@ -36,6 +37,71 @@ function stringValue(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function parseTotal(text, fallback) {
+  const match = String(text || "").match(/총\s*(\d+)\s*건/u);
+  return match ? Number.parseInt(match[1], 10) : fallback;
+}
+
+function compactSearchItem(item) {
+  return {
+    id: item.id,
+    caseNumber: item.caseNumber,
+    title: item.title,
+    court: item.court,
+    date: item.date,
+    caseType: item.caseType || "",
+    type: item.type || "",
+  };
+}
+
+const DETAIL_SECTIONS_FOR_AGENT = ["판시사항", "판결요지", "결정요지", "재결주문", "재결요지"];
+
+export function structureAgenticToolResult(name, result) {
+  const text = toolText(result);
+  const isError = Boolean(result?.isError);
+  const hasNotFound = text.includes("[NOT_FOUND]") || text.includes("[HALLUCINATION_DETECTED]");
+
+  if (name === "search_decisions") {
+    const items = parseDecisionSearchResults(text).map(compactSearchItem);
+    const output = { isError: isError || hasNotFound, total: parseTotal(text, items.length), items };
+    if (output.isError) output.message = text;
+    return output;
+  }
+
+  if (name === "search_law") {
+    const items = parseLawSearchResults(text).map((item) => ({
+      title: item.title,
+      lawId: item.lawId,
+      mst: item.mst,
+    }));
+    const output = { isError: isError || hasNotFound, total: parseTotal(text, items.length), items };
+    if (output.isError) output.message = text;
+    return output;
+  }
+
+  if (name === "get_decision_text") {
+    const detail = parseDecisionDetail(text);
+    const sections = Object.fromEntries(
+      DETAIL_SECTIONS_FOR_AGENT
+        .filter((section) => detail.sections[section])
+        .map((section) => [section, detail.sections[section]]),
+    );
+    const output = {
+      isError: isError || hasNotFound,
+      caseNumber: detail.caseNumber,
+      court: detail.court,
+      date: detail.date,
+      caseType: detail.caseType,
+      type: detail.type,
+      sections,
+    };
+    if (output.isError) output.message = text;
+    return output;
+  }
+
+  return { isError, text };
+}
+
 async function executeAgenticTool(name, rawArgs) {
   if (!TOOL_NAMES.has(name)) return toolError(`허용되지 않은 도구입니다: ${name || "(이름 없음)"}`);
   const args = rawArgs && typeof rawArgs === "object" ? rawArgs : {};
@@ -48,6 +114,7 @@ async function executeAgenticTool(name, rawArgs) {
       domain,
       query,
       display: integerOr(args.display, config.searchDisplay, 1, config.searchDisplay),
+      options: domain === "precedent" ? { search: 2 } : undefined,
     });
   }
 
@@ -155,18 +222,37 @@ function observeToolResult(candidates, name, result, args) {
 }
 
 function functionResponsePart(call, result) {
-  const text = toolText(result).slice(0, config.agenticToolResultMaxChars);
   return {
     functionResponse: {
       name: call.name,
       id: call.id,
       response: {
-        output: {
-          isError: Boolean(result?.isError),
-          text,
-        },
+        output: structureAgenticToolResult(call.name, result),
       },
     },
+  };
+}
+
+function serializeCandidate(candidate) {
+  return {
+    id: candidate.id,
+    caseNumber: candidate.caseNumber,
+    title: candidate.title,
+    court: candidate.court,
+    date: candidate.date,
+    caseType: candidate.caseType || "",
+    type: candidate.type || "",
+    domain: candidate.domain,
+    matchedKeywords: [...(candidate.matchedKeywords || [])],
+    preview: candidate.preview || "",
+  };
+}
+
+function serializeSelection(selection) {
+  if (!selection) return null;
+  return {
+    selected: (selection.selected || []).map((item) => ({ case_no: item.case_no, match: item.match })),
+    intro: selection.intro || "",
   };
 }
 
@@ -174,9 +260,10 @@ export async function runAgenticSearch(query) {
   const contents = [{ role: "user", parts: [{ text: query }] }];
   const candidates = new Map();
   let selection = null;
+  let questionCalls = 0;
+  let stopReason = "call_limit";
 
   try {
-    let questionCalls = 0;
     while (questionCalls < config.agenticCallMax) {
       const turn = await generateAgenticTurn(contents, [...candidates.keys()], questionCalls);
       questionCalls += turn.callsUsed;
@@ -184,6 +271,7 @@ export async function runAgenticSearch(query) {
       const functionCalls = response.functionCalls || [];
       if (functionCalls.length === 0) {
         selection = parseSelectionResponse(response);
+        stopReason = "completed";
         break;
       }
 
@@ -204,6 +292,9 @@ export async function runAgenticSearch(query) {
     }
   } catch (error) {
     error.observedCandidates = [...candidates.values()];
+    error.observedSelection = selection;
+    error.agentStopReason = "error";
+    error.agentCallsUsed = questionCalls;
     throw error;
   }
 
@@ -211,28 +302,46 @@ export async function runAgenticSearch(query) {
     selection: { selected: [], intro: "" },
     candidates: [...candidates.values()],
     limitReached: true,
+    stopReason,
+    callsUsed: questionCalls,
   };
-  return { selection, candidates: [...candidates.values()], limitReached: false };
+  return { selection, candidates: [...candidates.values()], limitReached: false, stopReason, callsUsed: questionCalls };
 }
 
 export async function runAgenticPipeline(query) {
   let search;
   let fallbackLabel = "";
+  let rawAgentCandidates = [];
+  let rawAgentSelection = null;
+  let agentStopReason = "error";
+  const fallbackReasons = [];
   try {
     search = await runAgenticSearch(query);
+    rawAgentCandidates = search.candidates;
+    rawAgentSelection = search.selection;
+    agentStopReason = search.stopReason;
   } catch (error) {
     const observedCandidates = error.observedCandidates || [];
+    rawAgentCandidates = observedCandidates;
+    rawAgentSelection = error.observedSelection || null;
+    agentStopReason = error.agentStopReason || "error";
     const fallbackCandidates = observedCandidates.length > 0
       ? observedCandidates
       : await collectCandidates(fallbackPlan(query));
+    if (observedCandidates.length === 0) fallbackReasons.push("deterministic_candidates");
     search = { selection: { selected: [], intro: "" }, candidates: fallbackCandidates };
     fallbackLabel = getFallbackLabel(error);
   }
 
   if (search.limitReached) {
     fallbackLabel = getFallbackLabel(new GeminiLimitExceededError("질문당 한도"));
-    if (search.candidates.length === 0) search.candidates = await collectCandidates(fallbackPlan(query));
+    if (search.candidates.length === 0) {
+      search.candidates = await collectCandidates(fallbackPlan(query));
+      fallbackReasons.push("deterministic_candidates");
+    }
   }
+
+  if ((search.selection?.selected || []).length === 0) fallbackReasons.push("ranked_fill");
 
   const prepared = await prepareCandidates(search.candidates);
   const lawReferences = await lookupQueryLawReferences(query);
@@ -246,10 +355,16 @@ export async function runAgenticPipeline(query) {
       candidateCaseNumbers: [],
       selected: [],
       items: [],
+      raw_agent_candidates: rawAgentCandidates.map(serializeCandidate),
+      raw_agent_selection: serializeSelection(rawAgentSelection),
+      agent_stop_reason: agentStopReason,
+      fallback_used: fallbackReasons.length > 0,
+      fallback_reason: [...new Set(fallbackReasons)],
+      final_product_output: null,
     };
   }
 
-  return finalizeSelection({
+  const finalResult = await finalizeSelection({
     query,
     candidatesWithPreview: prepared.candidatesWithPreview,
     candidatePool: search.candidates,
@@ -257,4 +372,13 @@ export async function runAgenticPipeline(query) {
     fallbackLabel,
     lawReferences,
   });
+  return {
+    ...finalResult,
+    raw_agent_candidates: rawAgentCandidates.map(serializeCandidate),
+    raw_agent_selection: serializeSelection(rawAgentSelection),
+    agent_stop_reason: agentStopReason,
+    fallback_used: fallbackReasons.length > 0,
+    fallback_reason: [...new Set(fallbackReasons)],
+    final_product_output: null,
+  };
 }
