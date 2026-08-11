@@ -441,9 +441,7 @@ export async function runAgenticSearch(query) {
   } catch (error) {
     error.observedCandidates = [...candidates.values()];
     error.observedSelection = selection;
-    error.agentStopReason = error?.code === "GEMINI_LIMIT_EXCEEDED" && /reserve|일일/u.test(String(error.reason || error.message))
-      ? "RPD_RESERVE_STOP"
-      : "ERROR";
+    error.agentStopReason = classifyAgentError(error);
     error.agentCallsUsed = questionCalls;
     trace.metrics.elapsedMs = Date.now() - startedAt;
     error.agentTrace = trace;
