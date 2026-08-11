@@ -39,6 +39,35 @@ full M6C screening: pending
 
 The pilot output is recorded in `logs/m6c-screening-pilot-2026-08-11.jsonl`. Full screening remains evaluation-only; no product integration decision has been made.
 
+## Final execution status — 2026-08-11
+
+The earlier status block is superseded by this completed screening record.
+
+```text
+branch: Agentic_diagnose
+latest implementation base: 72a6e1c
+screening runner follow-up: continue-after-quota=true is available
+external RPD reset baseline: 119/500
+new-session tail: 15/15 records, observed external RPD 144/500, quota skips 0
+combined screening: 90/90 records = 30 cases x D/A6/AO, no duplicate case-arm pairs
+segments: clean2 60 + prior tail2 15 + new-session tail 15
+syntax/check: npm run check PASS
+evaluation status: complete for the current m5-golden-1 suite
+product decision: pending; evaluation-only, no arm promoted
+```
+
+Aggregate results over the 30-case suite:
+
+| arm | valid | fallback used | final selection recall* | candidate recall* | raw agent selection recall* |
+|---|---:|---:|---:|---:|---:|
+| D | 19/30 | 0 | 0.522 | 0.261 | n/a |
+| A6 | 19/30 | 5 | 0.478 | 0.283 | 0.294 |
+| AO | 21/30 | 2 | 0.565 | 0.370 | 0.438 |
+
+`*` Recall averages exclude cases whose gold set is intentionally empty. The runner recorded 31 `expected_case_not_in_output` protocol failures; no duplicate records, HTTP protocol errors, or unverified non-empty final items were observed. The prior tail contains one explicitly recorded `RPD_RESERVE_STOP` (`agent_error_reason: 일일 reserve`) and remains separate from the post-reset session baseline.
+
+The external quota guard remains conservative by default. For the user's instruction to continue after the external RPD boundary, future screening runs may pass `--continue-after-quota=true`; this bypasses only the runner's skip guard. The application-level RPM/RPD reserve and fallback behavior remain enforced and logged.
+
 # 0. 배경
 
 현재 `case-finder`는 자연어 질의에 대해 두 가지 검색 경로를 운용·시험 중이다.
