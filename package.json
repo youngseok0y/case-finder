@@ -1,0 +1,21 @@
+{
+  "name": "fable-case-finder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Fable 규격의 법제처 근거 기반 판례 검색기",
+  "engines": {
+    "node": "24.14.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "check": "node --check config.js && node --check src/log.js && node --check src/mcpClient.js && node --check src/router.js && node --check src/directLookup.js && node --check src/rateLimiter.js && node --check src/gemini.js && node --check src/nlPipeline.js && node --check src/agenticPipeline.js && node --check src/validator.js && node --check src/renderer.js && node --check src/server.js && node --check test/run.js",
+    "verify": "node test/run.js"
+  },
+  "dependencies": {
+    "@google/genai": "2.13.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "dotenv": "17.4.2",
+    "korean-law-mcp": "4.9.6"
+  }
+}
