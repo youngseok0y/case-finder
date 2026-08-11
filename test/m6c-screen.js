@@ -130,7 +130,8 @@ async function waitForRpmBudget(expectedRequests) {
 
 function expectedGeminiRequests(arm, testCase) {
   if (testCase.kind === "direct") return 0;
-  return arm.name === "D" ? 2 : 6;
+  if (arm.name === "D") return 2;
+  return arm.name === "AO" ? 10 : 6;
 }
 
 await fs.mkdir(path.dirname(outputPath), { recursive: true });
