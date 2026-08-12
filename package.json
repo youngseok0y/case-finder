@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check config.js && node --check src/log.js && node --check src/mcpClient.js && node --check src/router.js && node --check src/directLookup.js && node --check src/rateLimiter.js && node --check src/gemini.js && node --check src/nlPipeline.js && node --check src/agenticPipeline.js && node --check src/validator.js && node --check src/renderer.js && node --check src/server.js && node --check test/run.js && node --check test/m6c-screen.js && node --check test/m6d-reanalyze.js && node --check test/m6d-rpm-pacer.js && node --check test/m6d-private-holdout.js && node --check test/m6d-review.js",
+    "check": "node --check config.js && node --check src/log.js && node --check src/mcpClient.js && node --check src/router.js && node --check src/directLookup.js && node --check src/rateLimiter.js && node --check src/gemini.js && node --check src/nlPipeline.js && node --check src/agenticPipeline.js && node --check src/validator.js && node --check src/renderer.js && node --check src/server.js && node --check test/run.js && node --check test/m6c-screen.js && node --check test/m6d-reanalyze.js && node --check test/m6d-rpm-pacer.js && node --check test/m6d-private-holdout.js && node --check test/m6d-review.js && node --check test/m6e-d-loss-diagnosis.js && node --check test/m6e-d-trace-parity.js && node --check test/m6e-d-trace-revalidation.js",
     "verify": "node test/run.js",
     "m6d:reanalyze": "node test/m6d-reanalyze.js",
     "m6d:test:pacer": "node test/m6d-rpm-pacer.js",

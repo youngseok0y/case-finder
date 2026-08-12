@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { config } from "../config.js";
 import { generatePlan, selectCandidates } from "./gemini.js";
 import {
@@ -109,11 +110,33 @@ export async function collectCandidates(plan, telemetry = null) {
     return { ...job, result };
   });
   const byCaseNumber = new Map();
-  for (const entry of searchResults) {
+  const queryStats = [];
+  for (const [queryIndex, entry] of searchResults.entries()) {
+    const job = jobs[queryIndex];
+    const rawText = entry.value?.result ? toolText(entry.value.result) : "";
+    const parsedResults = rawText && !rawText.includes("[NOT_FOUND]")
+      ? parseDecisionSearchResults(rawText)
+      : [];
+    const uniqueQueryKeys = new Set(parsedResults
+      .map((item) => normalizeCaseNumber(item.caseNumber))
+      .filter(Boolean)
+      .map(caseNumberKey));
+    if (telemetry?.dTrace && job) {
+      queryStats.push({
+        query_index: queryIndex,
+        query_hash: hashTraceValue(`${job.domain}\u0000${job.keyword}`),
+        domain: job.domain,
+        reported_total_results: null,
+        exposed_result_count: parsedResults.length,
+        unique_candidate_yield: uniqueQueryKeys.size,
+        duplicate_candidate_yield: Math.max(0, parsedResults.length - uniqueQueryKeys.size),
+        is_error: Boolean(entry.error || entry.value?.result?.isError),
+      });
+    }
     if (entry.error || entry.value?.result?.isError) continue;
-    const text = toolText(entry.value.result);
+    const text = rawText;
     if (!text || text.includes("[NOT_FOUND]")) continue;
-    for (const item of parseDecisionSearchResults(text)) {
+    for (const item of parsedResults) {
       const caseNumber = normalizeCaseNumber(item.caseNumber);
       if (!caseNumber) continue;
       const key = caseNumberKey(caseNumber);
@@ -130,11 +153,142 @@ export async function collectCandidates(plan, telemetry = null) {
       });
     }
   }
+  if (telemetry?.dTrace) {
+    telemetry.dTrace.search_queries = queryStats;
+    const resultCounts = queryStats.map((query) => query.exposed_result_count);
+    const yields = queryStats.map((query) => query.unique_candidate_yield);
+    const nonzero = resultCounts.filter((value) => value > 0);
+    const highResultThreshold = config.searchDisplay;
+    const yieldMean = yields.length === 0 ? 0 : yields.reduce((sum, value) => sum + value, 0) / yields.length;
+    telemetry.dTrace.search_dispersion = {
+      zero_result_query_count: resultCounts.filter((value) => value === 0).length,
+      nonzero_result_query_count: nonzero.length,
+      high_result_query_count: resultCounts.filter((value) => value >= highResultThreshold).length,
+      high_result_threshold: highResultThreshold,
+      result_count: numericSummary(resultCounts),
+      unique_candidate_yield: numericSummary(yields),
+      candidate_yield_stddev: yields.length === 0
+        ? null
+        : Math.sqrt(yields.reduce((sum, value) => sum + ((value - yieldMean) ** 2), 0) / yields.length),
+    };
+    const rawCandidates = [...byCaseNumber.values()];
+    telemetry.dTrace.candidates.raw_summary = candidateSummary(rawCandidates);
+    telemetry.dTrace.candidates.raw_candidate_count = rawCandidates.length;
+    telemetry.dTrace.candidates.single_query_candidate_ratio = rawCandidates.length === 0
+      ? null
+      : rawCandidates.filter((candidate) => candidateKeywordCount(candidate) === 1).length / rawCandidates.length;
+    telemetry.dTrace.candidates.multi_query_candidate_ratio = rawCandidates.length === 0
+      ? null
+      : rawCandidates.filter((candidate) => candidateKeywordCount(candidate) > 1).length / rawCandidates.length;
+  }
   return [...byCaseNumber.values()];
 }
 
 function normalizeLawName(value) {
   return String(value || "").replace(/\s+/gu, "").replace(/^대한민국헌법$/u, "헌법");
+}
+
+function hashTraceValue(value) {
+  return crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
+}
+
+function numericSummary(values) {
+  const finite = values.filter(Number.isFinite);
+  if (finite.length === 0) return { mean: null, median: null, min: null, max: null };
+  const sorted = [...finite].sort((left, right) => left - right);
+  const middle = (sorted.length - 1) / 2;
+  const lower = Math.floor(middle);
+  const upper = Math.ceil(middle);
+  return {
+    mean: finite.reduce((sum, value) => sum + value, 0) / finite.length,
+    median: lower === upper ? sorted[lower] : (sorted[lower] + sorted[upper]) / 2,
+    min: sorted[0],
+    max: sorted[sorted.length - 1],
+  };
+}
+
+function candidateKeywordCount(candidate) {
+  return candidate?.matchedKeywords instanceof Set
+    ? candidate.matchedKeywords.size
+    : Array.isArray(candidate?.matchedKeywords) ? candidate.matchedKeywords.length : 0;
+}
+
+function candidateSummary(candidates) {
+  const keywordCounts = candidates.map(candidateKeywordCount);
+  return {
+    count: candidates.length,
+    matched_keywords: numericSummary(keywordCounts),
+    preview_present_count: candidates.filter((candidate) => Boolean(String(candidate.preview || "").trim())).length,
+    preview_missing_count: candidates.filter((candidate) => !String(candidate.preview || "").trim()).length,
+  };
+}
+
+function rankingSummary(candidates) {
+  const scores = candidates.slice(0, 5).map((candidate) => Number(candidate.score)).filter(Number.isFinite);
+  const rank1 = scores[0] ?? null;
+  const rank2 = scores[1] ?? null;
+  const rank3 = scores[2] ?? null;
+  const rank12 = rank1 === null || rank2 === null ? null : rank1 - rank2;
+  const rank13 = rank1 === null || rank3 === null ? null : rank1 - rank3;
+  const mean = scores.length === 0 ? null : scores.reduce((sum, score) => sum + score, 0) / scores.length;
+  const variance = scores.length === 0 ? null : scores.reduce((sum, score) => sum + ((score - mean) ** 2), 0) / scores.length;
+  return {
+    rank1_score: rank1,
+    rank2_score: rank2,
+    rank3_score: rank3,
+    rank1_rank2_margin: rank12,
+    rank1_rank3_margin: rank13,
+    rank1_rank2_margin_ratio: rank12 === null || rank1 === 0 ? null : rank12 / Math.abs(rank1),
+    top5_score_mean: mean,
+    top5_score_stddev: variance === null ? null : Math.sqrt(variance),
+  };
+}
+
+function createDTrace() {
+  return {
+    schema_version: "m6e-d-trace-v1",
+    plan: null,
+    search_queries: [],
+    search_dispersion: null,
+    candidates: {
+      raw_candidate_count: null,
+      initial_ranked_candidate_count: null,
+      preview_candidate_count: null,
+      final_ranked_candidate_count: null,
+      verified_candidate_count: null,
+      raw_summary: null,
+      top5_summary: null,
+      raw_selected_summary: null,
+      ranking: null,
+    },
+    raw_selection: null,
+    final_selection: null,
+    validator: null,
+  };
+}
+
+function recordSelectionTrace(trace, selection, candidates) {
+  if (!trace) return;
+  const selected = Array.isArray(selection?.selected) ? selection.selected : [];
+  const selectedCandidates = selected
+    .map((item) => candidates.find((candidate) => caseNumberIncludes(candidate.caseNumber, item.case_no)))
+    .filter(Boolean);
+  const keywordCounts = selectedCandidates.map(candidateKeywordCount);
+  const previewPresent = selectedCandidates.filter((candidate) => Boolean(String(candidate.preview || "").trim())).length;
+  trace.raw_selection = {
+    raw_selected_count: selected.length,
+    raw_direct_count: selected.filter((item) => item.match === "direct").length,
+    raw_related_count: selected.filter((item) => item.match === "related").length,
+    raw_direct_ratio: selected.length === 0 ? null : selected.filter((item) => item.match === "direct").length / selected.length,
+    raw_selection_empty: selected.length === 0,
+    raw_selected_case_key_hashes: selected
+      .map((item) => caseNumberKey(item.case_no))
+      .filter(Boolean)
+      .map(hashTraceValue),
+    raw_selected_matched_keywords: numericSummary(keywordCounts),
+    raw_selected_preview_present_count: previewPresent,
+    raw_selected_preview_missing_count: selectedCandidates.length - previewPresent,
+  };
 }
 
 async function searchRelatedLaws(plan, telemetry = null) {
@@ -192,9 +346,27 @@ function closedWorldSelections(selection, candidates) {
 
 export async function prepareCandidates(candidates, telemetry = null) {
   const initialCandidates = rankCandidates(candidates);
+  if (telemetry?.dTrace) {
+    telemetry.dTrace.candidates.initial_ranked_candidate_count = initialCandidates.length;
+    telemetry.dTrace.candidates.top5_summary = candidateSummary(initialCandidates.slice(0, 5));
+    telemetry.dTrace.candidates.ranking = rankingSummary(initialCandidates);
+  }
   const previewEntries = await mapWithConcurrency(initialCandidates, config.searchConcurrency, (candidate) => previewCandidate(candidate, telemetry));
   const previewCandidates = previewEntries.filter((entry) => !entry.error).map((entry) => entry.value);
+  if (telemetry?.dTrace) {
+    const top5Preview = previewEntries.slice(0, 5).filter((entry) => !entry.error).map((entry) => entry.value);
+    telemetry.dTrace.candidates.preview_candidate_count = previewCandidates.length;
+    telemetry.dTrace.candidates.top5_preview_present_count = top5Preview.filter((candidate) => Boolean(String(candidate.preview || "").trim())).length;
+    telemetry.dTrace.candidates.top5_preview_missing_count = top5Preview.length - telemetry.dTrace.candidates.top5_preview_present_count;
+    telemetry.dTrace.candidates.top5_preview_missing_ratio = top5Preview.length === 0
+      ? null
+      : telemetry.dTrace.candidates.top5_preview_missing_count / top5Preview.length;
+  }
   const rankedCandidates = rankCandidates(previewCandidates, { applyPreviewPenalty: true });
+  if (telemetry?.dTrace) {
+    telemetry.dTrace.candidates.final_ranked_candidate_count = rankedCandidates.length;
+    telemetry.dTrace.candidates.ranking_after_preview_penalty = rankingSummary(rankedCandidates);
+  }
   return { rankedCandidates, candidatesWithPreview: rankedCandidates };
 }
 
@@ -244,8 +416,10 @@ export async function finalizeSelection({
   };
 }
 
-export async function runDeterministicPipeline(query) {
+export async function runDeterministicPipeline(query, dependencies = {}) {
   const startedAt = Date.now();
+  const traceEnabled = process.env.M6E_D_TRACE === "1";
+  const dTrace = traceEnabled ? createDTrace() : null;
   const telemetry = {
     geminiRequests: 0,
     geminiRetryRequests: 0,
@@ -257,31 +431,51 @@ export async function runDeterministicPipeline(query) {
     mcpSearchCalls: 0,
     mcpDetailCalls: 0,
     elapsedMs: 0,
+    dTrace,
   };
+  const generatePlanFn = dependencies.generatePlan || generatePlan;
+  const collectCandidatesFn = dependencies.collectCandidates || collectCandidates;
+  const searchRelatedLawsFn = dependencies.searchRelatedLaws || searchRelatedLaws;
+  const lookupQueryLawReferencesFn = dependencies.lookupQueryLawReferences || lookupQueryLawReferences;
+  const prepareCandidatesFn = dependencies.prepareCandidates || prepareCandidates;
+  const selectCandidatesFn = dependencies.selectCandidates || selectCandidates;
+  const finalizeSelectionFn = dependencies.finalizeSelection || finalizeSelection;
   let plan;
   let fallbackLabel = "";
   try {
-    plan = await generatePlan(query, telemetry);
+    plan = await generatePlanFn(query, telemetry);
   } catch (error) {
     plan = fallbackPlan(query);
     fallbackLabel = getFallbackLabel(error);
   }
+  if (dTrace) {
+    dTrace.plan = {
+      keyword_count: plan.keywords.length,
+      domain_count: plan.domains.length,
+      law_name_count: plan.law_names.length,
+    };
+  }
 
   const [rawCandidates, planLawReferences, queryLawReferences] = await Promise.all([
-    collectCandidates(plan, telemetry),
-    searchRelatedLaws(plan, telemetry),
-    lookupQueryLawReferences(query, telemetry),
+    collectCandidatesFn(plan, telemetry),
+    searchRelatedLawsFn(plan, telemetry),
+    lookupQueryLawReferencesFn(query, telemetry),
   ]);
+  if (dTrace && dTrace.candidates.raw_candidate_count === null) {
+    dTrace.candidates.raw_candidate_count = rawCandidates.length;
+    dTrace.candidates.raw_summary = candidateSummary(rawCandidates);
+  }
   const lawReferences = queryLawReferences.length > 0 ? queryLawReferences : planLawReferences;
-  const prepared = await prepareCandidates(rawCandidates, telemetry);
+  const prepared = await prepareCandidatesFn(rawCandidates, telemetry);
   let selection;
   try {
-    selection = await selectCandidates(query, prepared.candidatesWithPreview, telemetry);
+    selection = await selectCandidatesFn(query, prepared.candidatesWithPreview, telemetry);
   } catch (error) {
     selection = { selected: [], intro: "" };
     fallbackLabel = getFallbackLabel(error);
   }
-  const finalResult = await finalizeSelection({
+  recordSelectionTrace(dTrace, selection, prepared.candidatesWithPreview);
+  const finalResult = await finalizeSelectionFn({
     query,
     candidatesWithPreview: prepared.candidatesWithPreview,
     candidatePool: prepared.rankedCandidates,
@@ -290,6 +484,19 @@ export async function runDeterministicPipeline(query) {
     lawReferences,
     telemetry,
   });
+  if (dTrace) {
+    const finalSelected = Array.isArray(finalResult.selected) ? finalResult.selected : [];
+    dTrace.final_selection = {
+      final_selected_count: finalSelected.length,
+      final_direct_count: finalSelected.filter((item) => item.match === "direct").length,
+      final_related_count: finalSelected.filter((item) => item.match === "related").length,
+      final_selected_case_key_hashes: finalSelected.map((item) => hashTraceValue(caseNumberKey(item.caseNumber))),
+      ranked_fill_applied: Boolean(dTrace.raw_selection?.raw_selection_empty && finalSelected.length > 0),
+      selected_verified_count: (finalResult.items || []).filter((item) => item.status === "verified").length,
+      selected_validation_failed_count: (finalResult.items || []).filter((item) => item.status !== "verified").length,
+    };
+    dTrace.candidates.verified_candidate_count = dTrace.final_selection.selected_verified_count;
+  }
   telemetry.elapsedMs = Date.now() - startedAt;
   return {
     ...finalResult,
@@ -307,6 +514,7 @@ export async function runDeterministicPipeline(query) {
       stop_reason: fallbackLabel ? "FALLBACK_ERROR" : "MODEL_FINAL",
       fallback_used: Boolean(fallbackLabel),
     },
+    ...(dTrace ? { d_trace: dTrace } : {}),
   };
 }
 

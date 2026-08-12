@@ -27,11 +27,14 @@ const localRpdLimit = config.geminiRpdLimit;
 const safeReserve = 30;
 const providerRpdLimit = 500;
 
-const arms = [
+const allArms = [
   { name: "D", pipelineMode: "deterministic", agenticMode: "bounded" },
   { name: "A6", pipelineMode: "agentic", agenticMode: "bounded" },
   { name: "AO", pipelineMode: "agentic", agenticMode: "open" },
 ];
+const requestedArmNames = (process.env.HOLDOUT_ARMS || "D,A6,AO").split(",").map((value) => value.trim()).filter(Boolean);
+const arms = requestedArmNames.map((name) => allArms.find((arm) => arm.name === name)).filter(Boolean);
+if (arms.length === 0) throw new Error("HOLDOUT_ARMS must contain at least one of D,A6,AO");
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -210,6 +213,17 @@ function runRecord({ question, arm, payload, startedAt, usageBefore, usageAfter,
     raw_agent_candidate_set: result.raw_agent_candidate_set || result.raw_agent_candidates || [],
     raw_agent_selection: result.raw_agent_selection || null,
     fallback_candidate_set: result.fallback_candidate_set || [],
+    d_trace: result.d_trace
+      ? {
+        ...result.d_trace,
+        validator: {
+          protocol_pass: gate.pass,
+          rendered_item_count: items.length,
+          unverified_rendered_item_count: gate.unverified_rendered_items.length,
+          validation_failure_count: Array.isArray(result.validationFailures) ? result.validationFailures.length : 0,
+        },
+      }
+      : null,
     final_verified_items: items
       .filter((item) => item.status === "verified")
       .map((item) => ({ ...item, link: resolveVerifiedItemLink(result.raw_agent_candidate_set || result.raw_agent_candidates || [], item) })),
@@ -353,6 +367,7 @@ async function main() {
   }
   const questionsDocument = await readJson(questionsPath);
   validateQuestions(questionsDocument);
+  await fs.mkdir(privateDir, { recursive: true });
   if (executeMode) {
     const initialUsage = await readUsage();
     if (Number(initialUsage.callsToday || 0) !== expectedInitialRpd) {
@@ -379,6 +394,18 @@ async function main() {
         ...item,
         link: resolveVerifiedItemLink(record.raw_agent_candidate_set || [], item),
       }));
+      if (record.d_trace) {
+        record.d_trace.validator = {
+          protocol_pass: record.protocol_gate?.pass === true,
+          rendered_item_count: Array.isArray(record.final_product_output?.items) ? record.final_product_output.items.length : 0,
+          unverified_rendered_item_count: Array.isArray(record.protocol_gate?.unverified_rendered_items)
+            ? record.protocol_gate.unverified_rendered_items.length
+            : 0,
+          validation_failure_count: Array.isArray(record.final_product_output?.validationFailures)
+            ? record.final_product_output.validationFailures.length
+            : 0,
+        };
+      }
     }
     await fs.writeFile(runLogPath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
   } else {
