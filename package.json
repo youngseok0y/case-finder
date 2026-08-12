@@ -9,12 +9,14 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check config.js && node --check src/log.js && node --check src/mcpClient.js && node --check src/router.js && node --check src/directLookup.js && node --check src/rateLimiter.js && node --check src/gemini.js && node --check src/nlPipeline.js && node --check src/agenticPipeline.js && node --check src/validator.js && node --check src/renderer.js && node --check src/server.js && node --check test/run.js && node --check test/m6c-screen.js && node --check test/m6d-reanalyze.js && node --check test/m6d-rpm-pacer.js && node --check test/m6d-private-holdout.js && node --check test/m6d-review.js && node --check test/m6e-d-loss-diagnosis.js && node --check test/m6e-d-trace-parity.js && node --check test/m6e-d-trace-revalidation.js",
+    "check": "node --check config.js && node --check src/log.js && node --check src/mcpClient.js && node --check src/router.js && node --check src/directLookup.js && node --check src/rateLimiter.js && node --check src/gemini.js && node --check src/geminiRuntime.js && node --check src/codexCliRuntime.js && node --check src/modelRuntime.js && node --check src/nlPipeline.js && node --check src/agenticPipeline.js && node --check src/validator.js && node --check src/renderer.js && node --check src/server.js && node --check test/run.js && node --check test/m6c-screen.js && node --check test/m6d-reanalyze.js && node --check test/m6d-rpm-pacer.js && node --check test/m6d-private-holdout.js && node --check test/m6d-review.js && node --check test/m6e-d-loss-diagnosis.js && node --check test/m6e-d-trace-parity.js && node --check test/m6e-d-trace-revalidation.js && node --check test/m7-codex-preflight.js && node --check test/m7-four-arm-golden.js",
     "verify": "node test/run.js",
     "m6d:reanalyze": "node test/m6d-reanalyze.js",
     "m6d:test:pacer": "node test/m6d-rpm-pacer.js",
     "m6d:holdout": "node test/m6d-private-holdout.js --execute",
-    "m6d:review": "node test/m6d-review.js"
+    "m6d:review": "node test/m6d-review.js",
+    "m7:preflight": "node test/m7-codex-preflight.js",
+    "m7:golden": "node test/m7-four-arm-golden.js"
   },
   "dependencies": {
     "@google/genai": "2.13.0",

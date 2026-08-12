@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { config } from "../config.js";
-import { generatePlan, selectCandidates } from "./gemini.js";
+import { generatePlan, modelName, reasoningEffort, runtimeName, selectCandidates } from "./modelRuntime.js";
 import {
   lookupDecisionCandidate,
   enrichLawReferences,
@@ -421,12 +421,24 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
   const traceEnabled = process.env.M6E_D_TRACE === "1";
   const dTrace = traceEnabled ? createDTrace() : null;
   const telemetry = {
+    runtime: runtimeName,
+    model: modelName,
+    reasoningEffort,
     geminiRequests: 0,
     geminiRetryRequests: 0,
     geminiRpmWaitEvents: 0,
     geminiRpmWaitMs: 0,
     geminiInputTokens: 0,
     geminiOutputTokens: 0,
+    codexRequests: 0,
+    codexInputTokens: 0,
+    codexCachedInputTokens: 0,
+    codexOutputTokens: 0,
+    codexReasoningTokens: 0,
+    codexCreditEquivalent: 0,
+    codexApiEquivalentUsd: 0,
+    codexHandoffApiEquivalentUsd: 0,
+    codexElapsedMs: 0,
     mcpCallsTotal: 0,
     mcpSearchCalls: 0,
     mcpDetailCalls: 0,
@@ -507,6 +519,18 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
       gemini_rpm_wait_ms: telemetry.geminiRpmWaitMs,
       gemini_input_tokens: telemetry.geminiInputTokens,
       gemini_output_tokens: telemetry.geminiOutputTokens,
+      runtime: telemetry.runtime,
+      model: telemetry.model,
+      reasoning_effort: telemetry.reasoningEffort,
+      codex_requests: telemetry.codexRequests,
+      codex_input_tokens: telemetry.codexInputTokens,
+      codex_cached_input_tokens: telemetry.codexCachedInputTokens,
+      codex_output_tokens: telemetry.codexOutputTokens,
+      codex_reasoning_tokens: telemetry.codexReasoningTokens,
+      codex_credit_equivalent: telemetry.codexCreditEquivalent,
+      api_equivalent_usd: telemetry.codexApiEquivalentUsd,
+      api_equivalent_usd_handoff_snapshot: telemetry.codexHandoffApiEquivalentUsd,
+      codex_elapsed_ms: telemetry.codexElapsedMs,
       mcp_calls_total: telemetry.mcpCallsTotal,
       mcp_search_calls: telemetry.mcpSearchCalls,
       mcp_detail_calls: telemetry.mcpDetailCalls,

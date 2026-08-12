@@ -6,6 +6,7 @@ const currentFile = fileURLToPath(import.meta.url);
 const rootDir = path.dirname(currentFile);
 const configuredSearchDisplay = Number.parseInt(process.env.SEARCH_DISPLAY || "20", 10);
 const configuredAgenticMode = process.env.AGENTIC_MODE === "open" ? "open" : "bounded";
+const configuredModelRuntime = process.env.MODEL_RUNTIME === "codex_cli" ? "codex_cli" : "gemini";
 
 export const ROOT_DIR = rootDir;
 export const EXPECTED_NODE_VERSION = ">=24.14.0 <25";
@@ -22,6 +23,12 @@ export const config = Object.freeze({
   geminiRpmWaitMarginMs: 350,
   geminiRpdLimit: 450,
   geminiRetryDelayMs: 20_000,
+  modelRuntime: configuredModelRuntime,
+  codexModel: "gpt-5.6-luna",
+  codexReasoningEffort: "medium",
+  codexCliPath: process.env.CODEX_CLI_PATH || "codex",
+  codexWorkdir: path.resolve(rootDir, process.env.CODEX_WORKDIR || path.join("test", "private", "m7-codex-runtime", "workdir")),
+  codexTimeoutMs: Math.max(30_000, Number.parseInt(process.env.CODEX_TIMEOUT_MS || "300000", 10)),
   agenticCallMax: Number.parseInt(process.env.AGENTIC_CALL_MAX || "6", 10),
   agenticMode: configuredAgenticMode,
   aoRpdReserve: Math.max(0, Number.parseInt(process.env.AO_RPD_RESERVE || "30", 10)),

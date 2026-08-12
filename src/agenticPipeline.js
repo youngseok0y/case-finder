@@ -7,7 +7,7 @@ import {
   toolText,
 } from "./directLookup.js";
 import { caseNumberIncludes, caseNumberKey, normalizeCaseNumber } from "./router.js";
-import { generateAgenticTurn, parseSelectionResponse } from "./gemini.js";
+import { generateAgenticTurn, modelName, parseSelectionResponse, reasoningEffort, runtimeName } from "./modelRuntime.js";
 import { GeminiLimitExceededError } from "./rateLimiter.js";
 import {
   finalizeSelection,
@@ -286,12 +286,24 @@ function createAgenticTrace() {
   return {
     events: [],
     metrics: {
+      runtime: runtimeName,
+      model: modelName,
+      reasoningEffort,
       geminiRequests: 0,
       geminiRetryRequests: 0,
       geminiRpmWaitEvents: 0,
       geminiRpmWaitMs: 0,
       geminiInputTokens: 0,
       geminiOutputTokens: 0,
+      codexRequests: 0,
+      codexInputTokens: 0,
+      codexCachedInputTokens: 0,
+      codexOutputTokens: 0,
+      codexReasoningTokens: 0,
+      codexCreditEquivalent: 0,
+      codexApiEquivalentUsd: 0,
+      codexHandoffApiEquivalentUsd: 0,
+      codexElapsedMs: 0,
       mcpCallsTotal: 0,
       mcpSearchCalls: 0,
       mcpDetailCalls: 0,
@@ -303,12 +315,24 @@ function createAgenticTrace() {
 function publicAgentMetrics(metrics, stopReason, fallbackUsed) {
   if (!metrics) return null;
   return {
+    runtime: metrics.runtime || runtimeName,
+    model: metrics.model || modelName,
+    reasoning_effort: metrics.reasoningEffort || reasoningEffort,
     gemini_requests: metrics.geminiRequests || 0,
     gemini_retry_requests: metrics.geminiRetryRequests || 0,
     gemini_rpm_wait_events: metrics.geminiRpmWaitEvents || 0,
     gemini_rpm_wait_ms: metrics.geminiRpmWaitMs || 0,
     gemini_input_tokens: metrics.geminiInputTokens || 0,
     gemini_output_tokens: metrics.geminiOutputTokens || 0,
+    codex_requests: metrics.codexRequests || 0,
+    codex_input_tokens: metrics.codexInputTokens || 0,
+    codex_cached_input_tokens: metrics.codexCachedInputTokens || 0,
+    codex_output_tokens: metrics.codexOutputTokens || 0,
+    codex_reasoning_tokens: metrics.codexReasoningTokens || 0,
+    codex_credit_equivalent: metrics.codexCreditEquivalent || 0,
+    api_equivalent_usd: metrics.codexApiEquivalentUsd || 0,
+    api_equivalent_usd_handoff_snapshot: metrics.codexHandoffApiEquivalentUsd || 0,
+    codex_elapsed_ms: metrics.codexElapsedMs || 0,
     mcp_calls_total: metrics.mcpCallsTotal || 0,
     mcp_search_calls: metrics.mcpSearchCalls || 0,
     mcp_detail_calls: metrics.mcpDetailCalls || 0,
@@ -316,6 +340,22 @@ function publicAgentMetrics(metrics, stopReason, fallbackUsed) {
     stop_reason: stopReason,
     fallback_used: Boolean(fallbackUsed),
   };
+}
+
+function accumulateCodexMetrics(target, source) {
+  for (const key of [
+    "codexRequests",
+    "codexInputTokens",
+    "codexCachedInputTokens",
+    "codexOutputTokens",
+    "codexReasoningTokens",
+    "codexCreditEquivalent",
+    "codexApiEquivalentUsd",
+    "codexHandoffApiEquivalentUsd",
+    "codexElapsedMs",
+  ]) {
+    target[key] = (target[key] || 0) + (source[key] || 0);
+  }
 }
 
 function classifyAgentError(error) {
@@ -362,6 +402,15 @@ export async function runAgenticSearch(query) {
         geminiRpmWaitMs: 0,
         geminiInputTokens: 0,
         geminiOutputTokens: 0,
+        codexRequests: 0,
+        codexInputTokens: 0,
+        codexCachedInputTokens: 0,
+        codexOutputTokens: 0,
+        codexReasoningTokens: 0,
+        codexCreditEquivalent: 0,
+        codexApiEquivalentUsd: 0,
+        codexHandoffApiEquivalentUsd: 0,
+        codexElapsedMs: 0,
       };
       let turn;
       try {
@@ -382,16 +431,23 @@ export async function runAgenticSearch(query) {
         trace.metrics.geminiRpmWaitMs += turnTelemetry.geminiRpmWaitMs || 0;
         trace.metrics.geminiInputTokens += turnTelemetry.geminiInputTokens || 0;
         trace.metrics.geminiOutputTokens += turnTelemetry.geminiOutputTokens || 0;
+        accumulateCodexMetrics(trace.metrics, turnTelemetry);
         throw error;
       }
       questionCalls += turn.callsUsed;
-      trace.metrics.geminiRequests += turn.callsUsed;
-      trace.metrics.geminiRetryRequests += Math.max(0, turn.callsUsed - 1);
-      trace.metrics.geminiRpmWaitEvents += turnTelemetry.geminiRpmWaitEvents || 0;
-      trace.metrics.geminiRpmWaitMs += turnTelemetry.geminiRpmWaitMs || 0;
+      if (runtimeName === "gemini") {
+        trace.metrics.geminiRequests += turn.callsUsed;
+        trace.metrics.geminiRetryRequests += Math.max(0, turn.callsUsed - 1);
+        trace.metrics.geminiRpmWaitEvents += turnTelemetry.geminiRpmWaitEvents || 0;
+        trace.metrics.geminiRpmWaitMs += turnTelemetry.geminiRpmWaitMs || 0;
+      } else {
+        accumulateCodexMetrics(trace.metrics, turnTelemetry);
+      }
       const tokenCounts = responseTokenCounts(turn.response);
-      trace.metrics.geminiInputTokens += tokenCounts.inputTokens;
-      trace.metrics.geminiOutputTokens += tokenCounts.outputTokens;
+      if (runtimeName === "gemini") {
+        trace.metrics.geminiInputTokens += tokenCounts.inputTokens;
+        trace.metrics.geminiOutputTokens += tokenCounts.outputTokens;
+      }
       const response = turn.response;
       const functionCalls = response.functionCalls || [];
       if (functionCalls.length === 0) {
