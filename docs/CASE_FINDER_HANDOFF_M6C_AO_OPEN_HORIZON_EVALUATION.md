@@ -2,7 +2,7 @@
 ## AO Open-Horizon Agentic Evaluation
 ### 결정론 D / 제한형 A6 / 개방형 AO를 동일 검증 계층 아래 비교하여 orchestration 자유도의 실제 효용과 quota 비용을 측정한다
 
-> 상태: **READY AFTER PRE-AO RETRIEVAL FIXES LAND**
+> 상태: **M6C 평가 완료 — 제품 모드 미확정**
 >
 > 대상 저장소: `youngseok0y/case-finder`
 >
@@ -12,17 +12,17 @@
 >
 > 실험 브랜치: **`Agentic_diagnose`** (사용자 지정 override; 문서의 권장 브랜치명 대신 사용)
 >
-> 현재 상태: **실호출 전 준비 완료. AO/D/A6 실험은 아직 시작하지 않음.**
+> 최신 상태: **`df28007c52cd48fdb8fd5066ee4bdf209a42b0ff`에서 30문항 × 3 arm screening 완료. 제품 기본 arm은 아직 확정하지 않음.**
 >
 > 실험 목적: **AO를 제품 기본모드로 즉시 채택하는 것이 아니라, 질문당 호출 상한을 풀었을 때 회수·관련성이 얼마나 개선되고 그 개선에 Gemini quota를 얼마나 더 소비하는지 측정한다.**
 >
 > 핵심 불변조건: **어느 모드가 이기든 `case-finder-spec.md §7.2 validator`는 그대로 유지한다.**
 >
-> 제품 통합: **평가 완료 전 금지**
+> 제품 통합: **최종 모드 확정·사람 승인 전 금지**
 
 ---
 
-## Current execution status — 2026-08-11
+## Pilot status — historical, superseded by the final screening below
 
 ```text
 branch: Agentic_diagnose
@@ -34,10 +34,10 @@ offline check: npm run check PASS
 pilot: natural-rent-deposit, D/A6/AO = PASS/PASS/PASS
 pilot Gemini requests: D=2, A6=5, AO=2
 pilot observed external RPD: 9/500
-full M6C screening: pending
+full M6C screening: completed later; see final execution status below
 ```
 
-The pilot output is recorded in `logs/m6c-screening-pilot-2026-08-11.jsonl`. Full screening remains evaluation-only; no product integration decision has been made.
+The pilot output is recorded in `logs/m6c-screening-pilot-2026-08-11.jsonl`. The full screening remains evaluation-only; no product integration decision has been made.
 
 ## Final execution status — 2026-08-11
 
@@ -46,6 +46,7 @@ The earlier status block is superseded by this completed screening record.
 ```text
 branch: Agentic_diagnose
 latest implementation base: 72a6e1c
+latest report commit: df28007
 screening runner follow-up: continue-after-quota=true is available
 external RPD reset baseline: 119/500
 new-session tail: 15/15 records, observed external RPD 144/500, quota skips 0
@@ -70,11 +71,12 @@ The external quota guard remains conservative by default. For the user's instruc
 
 # 0. 배경
 
-현재 `case-finder`는 자연어 질의에 대해 두 가지 검색 경로를 운용·시험 중이다.
+현재 `case-finder`는 자연어 질의에 대해 두 가지 제품 경로와 하나의 평가 전용 경로를 운용·시험 중이다.
 
 ```text
 D   = deterministic
 A6  = bounded agentic, 질문당 Gemini 요청 최대 6회
+AO  = open-horizon agentic, M6C 비교 평가 전용
 ```
 
 최근 `law_test_v2`의 H12-Z 진단에서는 Direct가 다수 문항에서 강한 회수 우위 신호를 보였지만,

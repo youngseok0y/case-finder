@@ -5,7 +5,7 @@
 - 기준일: 2026-08-11
 - 저장소: `youngseok0y/case-finder`
 - 작업 브랜치: `Agentic_diagnose`
-- 최신 커밋: `1dd0ae6`
+- 최신 커밋: `df28007` (`add final M6C evaluation report`)
 - 평가 스위트: `m5-golden-1`
 - 범위: 결정론 arm D, 제한형 에이전틱 arm A6, open-horizon arm AO
 
@@ -150,4 +150,3 @@ AO는 후보 집합 단계와 agent 선택 단계 모두에서 가장 높은 rec
 - prior tail: `logs/m6c-screening-clean2-tail2-2026-08-11.jsonl`
 - post-reset tail: `logs/m6c-screening-session2-tail-2026-08-11.jsonl`
 - quota pilot: `logs/m6c-screening-pilot-2026-08-11.jsonl`
-

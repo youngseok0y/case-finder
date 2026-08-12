@@ -217,6 +217,18 @@ Gemini 함수 호출(function calling) 루프로 구현한다.
 - **결정 규칙**: 실존율 100%인 모드 중 관련성 평균이 높은 쪽을 채택한다. 동률이면 정답 포함률, 그다음 quota 효율 순.
 - **기록**: 평가 결과 표와 확정 모드를 본 문서에 추가하고, 탈락 모드는 config에서 비활성화한다. 탈락 모드의 코드 삭제는 사람 승인 후에만 한다.
 
+#### M6C 진단 평가 기록 (2026-08-11)
+
+M5의 기본 두 모드 비교를 확장해, 동일한 검증·도구 표면 아래에서 질문당 호출 상한만 제거한 AO(open-horizon) 진단 arm을 평가했다. AO는 제품 모드가 아니며, A1~A7과 §7.2 validator를 그대로 적용한다.
+
+| arm | golden protocol PASS | final selection recall | 평균 Gemini 요청 | fallback 사용 |
+|---|---:|---:|---:|---:|
+| D | 19/30 (63.3%) | 0.522 | 2.00 | 0 |
+| A6 | 19/30 (63.3%) | 0.478 | 4.42 | 5 |
+| AO | 21/30 (70.0%) | 0.565 | 4.89 | 2 |
+
+위 결과는 30문항 × 3 arm의 1회 screening이며, 명세가 요구하는 arm별 3회 반복과 사람의 상위 5건 관련성 점수가 아직 없다. 따라서 최종 제품 모드는 확정하지 않고, 현재 운영 기본값은 `PIPELINE_MODE=deterministic`로 유지한다. 후속 반복 평가와 사람 평가가 끝날 때까지 D/A6/AO 구현을 삭제하거나 비활성화하지 않는다. 상세 결과와 후속 과제는 `docs/CASE_FINDER_FINAL_REPORT_M6C.md` 및 `docs/CASE_FINDER_NEXT_TASKS_M6C.md`에 기록한다.
+
 ---
 
 ## 7. Route B — 사건번호 직접 조회 (directLookup.js) 및 검증 계층 (validator.js)
@@ -430,7 +442,7 @@ README에 두 키의 발급 절차를 단계별로 기술할 것 (법제처: ope
 
 ## 18. 구현 시 확인이 필요한 미확정 사항 (착수 시 반드시 해소하고 본 문서 갱신)
 
-- **A. korean-law-mcp 고정 버전과 도구 목록**: 이 명세 작성 시점(2026-08) 기준 v4.4대에서 노출 도구는 다음 10개로 확인됨 — `search_law`, `get_law_text`, `get_annexes`, `search_decisions`, `get_decision_text`, `legal_research`, `legal_analysis`, `ordinance_radar`, `discover_tools`, `execute_tool`. 착수 시 `npm view korean-law-mcp version`으로 최신 안정 버전을 확인해 고정하고, 실제 기동 후 도구 목록·파라미터 스키마를 덤프해 여기에 기록할 것. (버전에 따라 도구 통폐합이 잦았음: 공식 저장소 https://github.com/chrisryugj/korean-law-mcp)
+- **A. (확인 완료, 2026-08-11) korean-law-mcp 고정 버전과 도구 목록**: `package.json`과 lockfile은 `korean-law-mcp` `4.9.6`으로 고정되어 있으며, 실제 기동 시 도구 10개를 확인했다 — `search_law`, `get_law_text`, `get_annexes`, `search_decisions`, `get_decision_text`, `legal_research`, `legal_analysis`, `ordinance_radar`, `discover_tools`, `execute_tool`. 제품이 노출하는 Gemini 도구는 이 중 4개(`search_decisions`, `search_law`, `get_law_text`, `get_decision_text`)로 제한한다. 버전 업그레이드 시 §17.2 절차를 다시 따른다. (공식 저장소: https://github.com/chrisryugj/korean-law-mcp)
 - **B. (확인 완료, 2026-08-10)** `search_decisions` 응답의 `링크` 필드는 `/DRF/lawService.do` API URL이며, `target=prec`와 API 일련번호를 확인한 뒤 사용자 화면에서는 `https://www.law.go.kr/LSW/precInfoP.do?precSeq=<ID>`로 변환한다. `2018다248909`의 `ID=205791` 고정 URL을 실제 브라우저에서 열어 사건 본문을 확인했다. 법령 검색 응답의 `MST`는 `https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=<MST>`로 변환하며, `MST=284415`에서 민법 본문과 제393조를 확인했다. 인증키(`OC`)는 사용자 링크에 포함하지 않는다.
 - **C. (확인 완료, 2026-08-10)** Gemini free tier 한도: RPM 15 / 입력 TPM 250K / RPD 500 — **운영자가 직접 확인한 확정값**. 앱 내부 한도는 RPM 13 / RPD 450(§9). 추가 확인 작업 불필요하며, 향후 Google의 한도 변경 공지가 있을 때만 §9와 `config.js`를 갱신할 것.
 - **D. `@google/genai` responseSchema에서 enum 동적 주입 가능 여부**: 호출 ②의 사건번호 enum 제한이 SDK에서 정상 동작하는지 확인. 불가하면 validator만으로 방어(이미 설계에 포함).
@@ -446,7 +458,7 @@ README에 두 키의 발급 절차를 단계별로 기술할 것 (법제처: ope
 - Gemini rate limits: https://ai.google.dev/gemini-api/docs/rate-limits
 - MCP 사양: https://modelcontextprotocol.io
 
-*문서 버전 v1.1 — 2026-08-10. 갱신 시 이 줄에 이력 추가.*
+*문서 버전 v1.1-M6C — 2026-08-12. 갱신 시 이 줄에 이력 추가.*
 *v1.1 (2026-08-10): 생성 파라미터(temperature 등) 미설정으로 변경, 결정론/에이전틱 2모드 구현 + 비교 평가 체계 도입(§4, §6, §12), Gemini quota 확정값 반영 및 내부 한도 RPM 13/RPD 450 조정(§9, §18-C).*
 *v1.0 (2026-08-10): 최초 작성.*
 *v1.1-24.14.0 (2026-08-10): 실행 환경을 Node.js 24.14.0으로 변경.*
@@ -457,3 +469,4 @@ README에 두 키의 발급 절차를 단계별로 기술할 것 (법제처: ope
 *v1.1-M5-start (2026-08-11): 핵심 회귀 golden 세트와 무의존성 검증 러너를 추가하고 모드 비교 평가를 착수.*
 *v1.1-M5-1-2 (2026-08-11): 사건번호 병합·축약 표기의 구조적 비교와 본문검색 강제(search=2), 자연어 후보 표시 수 20건을 적용.*
 *v1.1-M5-3-5 (2026-08-11): 검색계획의 admin_appeal 도메인 정합화, 골든의 구조적 사건번호 비교, preview 부재 후보의 보수적 재랭킹 감점을 적용.*
+*v1.1-M6C (2026-08-12): D/A6/AO 30문항 screening 결과와 제품 모드 미확정 상태를 기록하고, korean-law-mcp 4.9.6 및 실제 도구 목록 확인 결과를 반영.*

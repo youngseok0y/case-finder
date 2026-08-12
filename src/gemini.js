@@ -163,38 +163,43 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function recordGeminiAttempt(telemetry, response, callsUsed) {
+function recordGeminiAttempt(telemetry, response, isRetry) {
   if (!telemetry) return;
-  telemetry.geminiRequests = (telemetry.geminiRequests || 0) + callsUsed;
-  telemetry.geminiRetryRequests = (telemetry.geminiRetryRequests || 0) + Math.max(0, callsUsed - 1);
+  telemetry.geminiRequests = (telemetry.geminiRequests || 0) + 1;
+  telemetry.geminiRetryRequests = (telemetry.geminiRetryRequests || 0) + (isRetry ? 1 : 0);
   const usage = response?.usageMetadata || {};
   telemetry.geminiInputTokens = (telemetry.geminiInputTokens || 0) + Number(usage.promptTokenCount || usage.inputTokenCount || 0);
   telemetry.geminiOutputTokens = (telemetry.geminiOutputTokens || 0) + Number(usage.candidatesTokenCount || usage.outputTokenCount || 0);
 }
 
-async function generateContent(request, options = {}) {
-  const ai = await getClient();
-  await reserveGeminiCall(Date.now(), options);
+export async function generateContent(request, options = {}) {
+  const ai = options.generate ? null : await getClient();
+  const generate = options.generate || ((payload) => ai.models.generateContent(payload));
+  const reserveCall = options.reserveGeminiCall || reserveGeminiCall;
+  const waitForRetry = options.sleep || wait;
+  const retryDelayMs = Number.isInteger(options.retryDelayMs) ? options.retryDelayMs : config.geminiRetryDelayMs;
+  await reserveCall(Date.now(), options);
   try {
-    const response = await ai.models.generateContent(request);
-    recordGeminiAttempt(options.telemetry, response, 1);
+    const response = await generate(request);
+    recordGeminiAttempt(options.telemetry, response, false);
     return options.returnMeta ? { response, callsUsed: 1 } : response;
   } catch (error) {
     if (!isRateLimitError(error)) {
-      recordGeminiAttempt(options.telemetry, null, 1);
+      recordGeminiAttempt(options.telemetry, null, false);
       throw error;
     }
-    await wait(config.geminiRetryDelayMs);
+    recordGeminiAttempt(options.telemetry, null, false);
+    await waitForRetry(retryDelayMs);
     const retryOptions = Number.isInteger(options.questionCalls)
       ? { ...options, questionCalls: options.questionCalls + 1 }
       : options;
-    await reserveGeminiCall(Date.now(), retryOptions);
+    await reserveCall(Date.now(), retryOptions);
     try {
-      const response = await ai.models.generateContent(request);
-      recordGeminiAttempt(options.telemetry, response, 2);
+      const response = await generate(request);
+      recordGeminiAttempt(options.telemetry, response, true);
       return options.returnMeta ? { response, callsUsed: 2 } : response;
     } catch (retryError) {
-      recordGeminiAttempt(options.telemetry, null, 2);
+      recordGeminiAttempt(options.telemetry, null, true);
       throw retryError;
     }
   }

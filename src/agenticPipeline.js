@@ -288,6 +288,8 @@ function createAgenticTrace() {
     metrics: {
       geminiRequests: 0,
       geminiRetryRequests: 0,
+      geminiRpmWaitEvents: 0,
+      geminiRpmWaitMs: 0,
       geminiInputTokens: 0,
       geminiOutputTokens: 0,
       mcpCallsTotal: 0,
@@ -303,6 +305,8 @@ function publicAgentMetrics(metrics, stopReason, fallbackUsed) {
   return {
     gemini_requests: metrics.geminiRequests || 0,
     gemini_retry_requests: metrics.geminiRetryRequests || 0,
+    gemini_rpm_wait_events: metrics.geminiRpmWaitEvents || 0,
+    gemini_rpm_wait_ms: metrics.geminiRpmWaitMs || 0,
     gemini_input_tokens: metrics.geminiInputTokens || 0,
     gemini_output_tokens: metrics.geminiOutputTokens || 0,
     mcp_calls_total: metrics.mcpCallsTotal || 0,
@@ -319,6 +323,7 @@ function classifyAgentError(error) {
   if (error?.code === "GEMINI_LIMIT_EXCEEDED") {
     if (/reserve/u.test(reason)) return "RPD_RESERVE_STOP";
     if (/일일|daily|rpd/i.test(reason)) return "RPD_LIMIT_STOP";
+    if (/질문|question/i.test(reason)) return "QUESTION_CALL_LIMIT";
     if (/분당|rpm|minute/i.test(reason)) return "RPM_LIMIT_STOP";
     return "GEMINI_LIMIT_STOP";
   }
@@ -350,18 +355,40 @@ export async function runAgenticSearch(query) {
         break;
       }
 
-      const turn = await generateAgenticTurn(
-        contents,
-        [...candidates.keys()],
-        questionCalls,
-        {
-          enforceQuestionLimit: !openHorizon,
-          rpdReserve: openHorizon ? config.aoRpdReserve : 0,
-        },
-      );
+      const turnTelemetry = {
+        geminiRequests: 0,
+        geminiRetryRequests: 0,
+        geminiRpmWaitEvents: 0,
+        geminiRpmWaitMs: 0,
+        geminiInputTokens: 0,
+        geminiOutputTokens: 0,
+      };
+      let turn;
+      try {
+        turn = await generateAgenticTurn(
+          contents,
+          [...candidates.keys()],
+          questionCalls,
+          {
+            enforceQuestionLimit: !openHorizon,
+            rpdReserve: openHorizon ? config.aoRpdReserve : 0,
+            telemetry: turnTelemetry,
+          },
+        );
+      } catch (error) {
+        trace.metrics.geminiRequests += turnTelemetry.geminiRequests || 0;
+        trace.metrics.geminiRetryRequests += turnTelemetry.geminiRetryRequests || 0;
+        trace.metrics.geminiRpmWaitEvents += turnTelemetry.geminiRpmWaitEvents || 0;
+        trace.metrics.geminiRpmWaitMs += turnTelemetry.geminiRpmWaitMs || 0;
+        trace.metrics.geminiInputTokens += turnTelemetry.geminiInputTokens || 0;
+        trace.metrics.geminiOutputTokens += turnTelemetry.geminiOutputTokens || 0;
+        throw error;
+      }
       questionCalls += turn.callsUsed;
       trace.metrics.geminiRequests += turn.callsUsed;
       trace.metrics.geminiRetryRequests += Math.max(0, turn.callsUsed - 1);
+      trace.metrics.geminiRpmWaitEvents += turnTelemetry.geminiRpmWaitEvents || 0;
+      trace.metrics.geminiRpmWaitMs += turnTelemetry.geminiRpmWaitMs || 0;
       const tokenCounts = responseTokenCounts(turn.response);
       trace.metrics.geminiInputTokens += tokenCounts.inputTokens;
       trace.metrics.geminiOutputTokens += tokenCounts.outputTokens;

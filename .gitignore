@@ -5,3 +5,4 @@ state/*
 !state/.gitkeep
 logs/*
 !logs/.gitkeep
+test/private/

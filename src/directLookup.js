@@ -252,6 +252,7 @@ export async function lookupDecisionCandidate(candidate, domain = "precedent", p
 
   return {
     status: detailValid ? "verified" : "validation_failed",
+    providerId: String(candidate.id || ""),
     caseNumber: normalizeCaseNumber(candidate.caseNumber),
     candidateCaseNumbers: candidate.candidateCaseNumbers || [candidate.caseNumber],
     title: candidate.title,

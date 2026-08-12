@@ -249,6 +249,8 @@ export async function runDeterministicPipeline(query) {
   const telemetry = {
     geminiRequests: 0,
     geminiRetryRequests: 0,
+    geminiRpmWaitEvents: 0,
+    geminiRpmWaitMs: 0,
     geminiInputTokens: 0,
     geminiOutputTokens: 0,
     mcpCallsTotal: 0,
@@ -294,6 +296,8 @@ export async function runDeterministicPipeline(query) {
     metrics: {
       gemini_requests: telemetry.geminiRequests,
       gemini_retry_requests: telemetry.geminiRetryRequests,
+      gemini_rpm_wait_events: telemetry.geminiRpmWaitEvents,
+      gemini_rpm_wait_ms: telemetry.geminiRpmWaitMs,
       gemini_input_tokens: telemetry.geminiInputTokens,
       gemini_output_tokens: telemetry.geminiOutputTokens,
       mcp_calls_total: telemetry.mcpCallsTotal,

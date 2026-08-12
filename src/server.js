@@ -31,6 +31,7 @@ function attachAgenticFinalOutput(result) {
       query: result.query,
       selected: result.selected || [],
       items: (result.items || []).map((item) => ({
+        providerId: item.providerId || "",
         caseNumber: item.caseNumber,
         status: item.status,
         match: item.match,

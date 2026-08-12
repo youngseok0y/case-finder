@@ -19,6 +19,7 @@ export const config = Object.freeze({
   mcpTimeoutMs: 30_000,
   mcpProbeQuery: "민법",
   geminiRpmLimit: 13,
+  geminiRpmWaitMarginMs: 350,
   geminiRpdLimit: 450,
   geminiRetryDelayMs: 20_000,
   agenticCallMax: Number.parseInt(process.env.AGENTIC_CALL_MAX || "6", 10),
