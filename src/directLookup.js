@@ -111,6 +111,14 @@ export function sanitizeApiLink(rawLink, fallbackId = "") {
   }
 }
 
+export function decisionDetailLink(domain, providerId) {
+  const id = String(providerId || "");
+  if (!/^\d+$/.test(id)) return "";
+  const path = domain === "precedent" ? "precInfoP.do" : "detcInfoP.do";
+  const parameter = domain === "precedent" ? "precSeq" : "detcSeq";
+  return `https://www.law.go.kr/LSW/${path}?${parameter}=${encodeURIComponent(id)}`;
+}
+
 export function parseDecisionDetail(rawText) {
   const text = decodeBasicHtml(rawText);
   const sections = {};
@@ -260,7 +268,7 @@ export async function lookupDecisionCandidate(candidate, domain = "precedent", p
     date: detail.date || candidate.date,
     caseType: detail.caseType || candidate.caseType,
     type: detail.type || candidate.type,
-    link: sanitizeApiLink(candidate.link, candidate.id),
+    link: sanitizeApiLink(candidate.link, candidate.id) || decisionDetailLink(domain, candidate.id),
     detail,
     lawReferences: detailValid ? await enrichLawReferences(detail.sections.참조조문 || "", telemetry) : [],
   };

@@ -3,15 +3,25 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { config, ROOT_DIR } from "../config.js";
+import { decisionDetailLink } from "../src/directLookup.js";
 
-const privateDir = path.join(ROOT_DIR, "test", "private", "m6d-holdout");
-const questionsPath = path.join(privateDir, "questions.json");
-const runLogPath = path.join(ROOT_DIR, "logs", "m6d-private-holdout-runs.jsonl");
-const summaryPath = path.join(ROOT_DIR, "logs", "m6d-private-holdout-run-summary.json");
-const armComparisonPath = path.join(ROOT_DIR, "logs", "m6d-private-holdout-arm-comparison.json");
+const holdoutPrefix = process.env.HOLDOUT_PREFIX || "M6D";
+const privateDir = path.resolve(ROOT_DIR, process.env.HOLDOUT_PRIVATE_DIR || path.join("test", "private", "m6d-holdout"));
+const questionsPath = path.join(privateDir, process.env.HOLDOUT_QUESTIONS_FILE || "questions.json");
+const runLogPath = path.resolve(ROOT_DIR, process.env.HOLDOUT_RUN_LOG || path.join("logs", "m6d-private-holdout-runs.jsonl"));
+const summaryPath = path.resolve(ROOT_DIR, process.env.HOLDOUT_SUMMARY || path.join("logs", "m6d-private-holdout-run-summary.json"));
+const armComparisonPath = path.resolve(ROOT_DIR, process.env.HOLDOUT_ARM_COMPARISON || path.join("logs", "m6d-private-holdout-arm-comparison.json"));
 const blindPacketPath = path.join(privateDir, "blind_packet.json");
 const unmaskKeyPath = path.join(privateDir, "unmask_key.json");
-const port = 3341;
+const packetId = process.env.HOLDOUT_PACKET_ID || "M6D_PRIVATE_HOLDOUT_2026-08-12";
+const reviewerInstructions = process.env.HOLDOUT_REVIEWER_INSTRUCTIONS || "docs/CASE_FINDER_M6D_PRIVATE_BLIND_REVIEW_INSTRUCTIONS.md";
+const successCheckpoint = process.env.HOLDOUT_SUCCESS_CHECKPOINT || "M6D_AWAITING_EXTERNAL_BLIND_REVIEW";
+const invalidCheckpoint = process.env.HOLDOUT_INVALID_CHECKPOINT || "M6D_PROTOCOL_INVALID";
+const expectedQuestionCount = Number.parseInt(process.env.HOLDOUT_QUESTION_COUNT || "10", 10);
+const expectedInitialRpd = Number.parseInt(process.env.HOLDOUT_INITIAL_RPD || "0", 10);
+const providerInitialRpd = Number.parseInt(process.env.HOLDOUT_PROVIDER_INITIAL_RPD || String(expectedInitialRpd), 10);
+const questionIdPattern = new RegExp(process.env.HOLDOUT_ID_PATTERN || "^MH\\d{2}$", "u");
+const port = Number.parseInt(process.env.HOLDOUT_PORT || "3341", 10);
 const requestTimeoutMs = 900_000;
 const localRpdLimit = config.geminiRpdLimit;
 const safeReserve = 30;
@@ -46,6 +56,12 @@ function average(values) {
   return valid.length === 0 ? null : valid.reduce((sum, value) => sum + value, 0) / valid.length;
 }
 
+function resolveVerifiedItemLink(rawCandidates, item) {
+  if (item.link) return item.link;
+  const candidate = rawCandidates.find((entry) => String(entry.id || "") === String(item.providerId || ""));
+  return candidate ? decisionDetailLink(candidate.domain, item.providerId) : "";
+}
+
 async function readJson(filePath) {
   return JSON.parse(await fs.readFile(filePath, "utf8"));
 }
@@ -59,20 +75,20 @@ async function readUsage() {
 }
 
 function validateQuestions(document) {
-  if (document.status !== "FROZEN" || !Array.isArray(document.questions) || document.questions.length !== 10) {
-    throw new Error("M6D_PRIVATE_INPUT_INVALID");
+  if (document.status !== "FROZEN" || !Array.isArray(document.questions) || document.questions.length !== expectedQuestionCount) {
+    throw new Error(`${holdoutPrefix}_PRIVATE_INPUT_INVALID`);
   }
   const ids = new Set();
   for (const question of document.questions) {
-    if (!/^MH\d{2}$/u.test(question.question_id) || ids.has(question.question_id)) {
-      throw new Error("M6D_PRIVATE_INPUT_INVALID");
+    if (!questionIdPattern.test(question.question_id) || ids.has(question.question_id)) {
+      throw new Error(`${holdoutPrefix}_PRIVATE_INPUT_INVALID`);
     }
     ids.add(question.question_id);
     if (!question.query || sha256(question.query) !== question.question_sha256) {
-      throw new Error(`M6D_PRIVATE_HASH_MISMATCH:${question.question_id}`);
+      throw new Error(`${holdoutPrefix}_PRIVATE_HASH_MISMATCH:${question.question_id}`);
     }
     if (question.char_count !== [...question.query].length) {
-      throw new Error(`M6D_PRIVATE_CHAR_COUNT_MISMATCH:${question.question_id}`);
+      throw new Error(`${holdoutPrefix}_PRIVATE_CHAR_COUNT_MISMATCH:${question.question_id}`);
     }
   }
 }
@@ -194,7 +210,9 @@ function runRecord({ question, arm, payload, startedAt, usageBefore, usageAfter,
     raw_agent_candidate_set: result.raw_agent_candidate_set || result.raw_agent_candidates || [],
     raw_agent_selection: result.raw_agent_selection || null,
     fallback_candidate_set: result.fallback_candidate_set || [],
-    final_verified_items: items.filter((item) => item.status === "verified"),
+    final_verified_items: items
+      .filter((item) => item.status === "verified")
+      .map((item) => ({ ...item, link: resolveVerifiedItemLink(result.raw_agent_candidate_set || result.raw_agent_candidates || [], item) })),
     final_product_output: result.final_product_output || {
       route: result.route || "natural",
       query: result.query || question.query,
@@ -314,68 +332,87 @@ function buildBlindArtifacts(questions, records) {
   return {
     packet: {
       schema_version: "m6d-blind-packet-v1",
-      packet_id: "M6D_PRIVATE_HOLDOUT_2026-08-12",
-      reviewer_instructions: "docs/CASE_FINDER_M6D_PRIVATE_BLIND_REVIEW_INSTRUCTIONS.md",
+      packet_id: packetId,
+      reviewer_instructions: reviewerInstructions,
       samples,
     },
     unmask: {
       schema_version: "m6d-unmask-key-v1",
-      packet_id: "M6D_PRIVATE_HOLDOUT_2026-08-12",
+      packet_id: packetId,
       samples: unmask,
     },
   };
 }
 
 async function main() {
-  if (!process.argv.includes("--execute")) {
-    console.log("M6D private holdout runner: pass --execute to run the 30 external-call holdout.");
+  const executeMode = process.argv.includes("--execute");
+  const rebuildMode = process.argv.includes("--rebuild");
+  if (!executeMode && !rebuildMode) {
+    console.log(`${holdoutPrefix} private holdout runner: pass --execute to run or --rebuild to regenerate artifacts from an existing run log.`);
     return;
   }
   const questionsDocument = await readJson(questionsPath);
   validateQuestions(questionsDocument);
-  const initialUsage = await readUsage();
-  if (Number(initialUsage.callsToday || 0) !== 0 || (initialUsage.recentCalls || []).length !== 0) {
-    throw new Error(`M6D_RPD_NOT_CLEAN:${JSON.stringify(initialUsage)}`);
+  if (executeMode) {
+    const initialUsage = await readUsage();
+    if (Number(initialUsage.callsToday || 0) !== expectedInitialRpd) {
+      throw new Error(`${holdoutPrefix}_RPD_BASELINE_MISMATCH:${JSON.stringify({ expected: expectedInitialRpd, actual: initialUsage })}`);
+    }
   }
   await fs.mkdir(path.dirname(runLogPath), { recursive: true });
-  try {
-    await fs.access(runLogPath);
-    throw new Error(`M6D_RUN_LOG_EXISTS:${runLogPath}`);
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
+  if (executeMode) {
+    try {
+      await fs.access(runLogPath);
+      throw new Error(`${holdoutPrefix}_RUN_LOG_EXISTS:${runLogPath}`);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    await fs.writeFile(runLogPath, "", "utf8");
   }
-  await fs.writeFile(runLogPath, "", "utf8");
-  const records = [];
+  let records;
   const runStartedAt = Date.now();
-  for (const [questionIndex, question] of questionsDocument.questions.entries()) {
-    const order = arms.map((_, offset) => arms[(questionIndex + offset) % arms.length]);
-    for (const arm of order) {
-      const runId = `${question.question_id}-${arm.name}-${String(records.length + 1).padStart(2, "0")}`;
-      const usageBefore = await readUsage();
-      if (Number(usageBefore.callsToday || 0) >= localRpdLimit) throw new Error(`M6D_RPD_LIMIT_REACHED:${runId}`);
-      const startedAt = Date.now();
-      let payload;
-      let server;
-      try {
-        server = await startServer(arm);
-        payload = await ask(question.query);
-      } catch (error) {
-        payload = { ok: false, message: error.message, httpStatus: null };
-      } finally {
-        await stopServer(server);
-      }
-      const usageAfter = await readUsage();
-      const record = runRecord({ question, arm, payload, startedAt, usageBefore, usageAfter, runId });
-      records.push(record);
-      await fs.appendFile(runLogPath, `${JSON.stringify(record)}\n`, "utf8");
-      console.log(JSON.stringify({
-        question_id: question.question_id,
-        arm: arm.name,
-        status: record.status,
-        gemini_requests: record.gemini_requests,
-        local_rpd: usageAfter.callsToday,
-        rpm_wait_ms: record.gemini_rpm_wait_ms,
+  if (rebuildMode) {
+    const rawLog = await fs.readFile(runLogPath, "utf8");
+    records = rawLog.split(/\r?\n/u).filter(Boolean).map((line) => JSON.parse(line));
+    for (const record of records) {
+      record.final_verified_items = (record.final_verified_items || []).map((item) => ({
+        ...item,
+        link: resolveVerifiedItemLink(record.raw_agent_candidate_set || [], item),
       }));
+    }
+    await fs.writeFile(runLogPath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
+  } else {
+    records = [];
+    for (const [questionIndex, question] of questionsDocument.questions.entries()) {
+      const order = arms.map((_, offset) => arms[(questionIndex + offset) % arms.length]);
+      for (const arm of order) {
+        const runId = `${question.question_id}-${arm.name}-${String(records.length + 1).padStart(2, "0")}`;
+        const usageBefore = await readUsage();
+        if (Number(usageBefore.callsToday || 0) >= localRpdLimit) throw new Error(`${holdoutPrefix}_RPD_LIMIT_REACHED:${runId}`);
+        const startedAt = Date.now();
+        let payload;
+        let server;
+        try {
+          server = await startServer(arm);
+          payload = await ask(question.query);
+        } catch (error) {
+          payload = { ok: false, message: error.message, httpStatus: null };
+        } finally {
+          await stopServer(server);
+        }
+        const usageAfter = await readUsage();
+        const record = runRecord({ question, arm, payload, startedAt, usageBefore, usageAfter, runId });
+        records.push(record);
+        await fs.appendFile(runLogPath, `${JSON.stringify(record)}\n`, "utf8");
+        console.log(JSON.stringify({
+          question_id: question.question_id,
+          arm: arm.name,
+          status: record.status,
+          gemini_requests: record.gemini_requests,
+          local_rpd: usageAfter.callsToday,
+          rpm_wait_ms: record.gemini_rpm_wait_ms,
+        }));
+      }
     }
   }
 
@@ -385,11 +422,14 @@ async function main() {
   const packetIssues = records.flatMap((record) => record.final_verified_items
     .filter((item) => !item.providerId || !item.link)
     .map((item) => ({ run_id: record.run_id, case_number: item.caseNumber, missing_provider_id: !item.providerId, missing_source_locator: !item.link })));
-  const protocolInvalid = records.length !== 30
+  const plannedRuns = expectedQuestionCount * arms.length;
+  const rpdHardStopCount = records.filter((record) => ["RPD_LIMIT_STOP", "RPD_RESERVE_STOP"].includes(record.agent_stop_reason)).length;
+  const protocolInvalid = records.length !== plannedRuns
     || records.some((record) => record.status !== "PASS")
     || packetIssues.length > 0
-    || Object.values(armSummary).some((summary) => summary.rpm_limit_stop_count > 0);
-  const checkpoint = protocolInvalid ? "M6D_PROTOCOL_INVALID" : "M6D_AWAITING_EXTERNAL_BLIND_REVIEW";
+    || Object.values(armSummary).some((summary) => summary.rpm_limit_stop_count > 0)
+    || rpdHardStopCount > 0;
+  const checkpoint = protocolInvalid ? invalidCheckpoint : successCheckpoint;
   const summary = {
     checkpoint,
     packet_status: protocolInvalid ? "HOLD" : "READY_FOR_EXTERNAL_REVIEW",
@@ -401,18 +441,19 @@ async function main() {
       question_text_tracked: false,
     },
     quota: {
-      local_rpd: { initial: 0, limit: localRpdLimit, final: Number(finalUsage.callsToday || 0) },
-      provider_rpd: { initial: 0, limit: providerRpdLimit, independently_observable: false },
+      local_rpd: { initial: expectedInitialRpd, limit: localRpdLimit, final: Number(finalUsage.callsToday || 0) },
+      provider_rpd: { initial: providerInitialRpd, limit: providerRpdLimit, independently_observable: false },
       rpm_limit: config.geminiRpmLimit,
       rpm_wait_margin_ms: config.geminiRpmWaitMarginMs,
       ao_rpd_reserve: config.aoRpdReserve,
-      planned_runs: 30,
+      planned_runs: plannedRuns,
     },
     runs: {
       total: records.length,
       pass: records.filter((record) => record.status === "PASS").length,
       fail: records.filter((record) => record.status !== "PASS").length,
       rpm_limit_stop_count: records.filter((record) => record.agent_stop_reason === "RPM_LIMIT_STOP").length,
+      rpd_hard_stop_count: rpdHardStopCount,
       total_gemini_requests: records.reduce((sum, record) => sum + record.gemini_requests, 0),
       total_rpm_wait_events: records.reduce((sum, record) => sum + record.gemini_rpm_wait_events, 0),
       total_rpm_wait_ms: records.reduce((sum, record) => sum + record.gemini_rpm_wait_ms, 0),
@@ -421,8 +462,8 @@ async function main() {
     arm_summary: armSummary,
     packet: {
       sample_count: artifacts.packet.samples.length,
-      packet_path: "test/private/m6d-holdout/blind_packet.json",
-      unmask_key_path: "test/private/m6d-holdout/unmask_key.json",
+      packet_path: path.relative(ROOT_DIR, blindPacketPath),
+      unmask_key_path: path.relative(ROOT_DIR, unmaskKeyPath),
       packet_issues: packetIssues,
     },
     next_step: protocolInvalid ? "Investigate protocol failure before reviewer handoff." : "External reviewer may evaluate the blind packet; do not unmask yet.",
