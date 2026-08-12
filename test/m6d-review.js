@@ -2,14 +2,18 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { ROOT_DIR } from "../config.js";
 
-const privateDir = path.join(ROOT_DIR, "test", "private", "m6d-holdout");
-const packetPath = path.join(privateDir, "blind_packet.json");
-const keyPath = path.join(privateDir, "unmask_key.json");
-const scoresPath = path.join(privateDir, "blind_review_scores.jsonl");
-const runLogPath = path.join(ROOT_DIR, "logs", "m6d-private-holdout-runs.jsonl");
-const runSummaryPath = path.join(ROOT_DIR, "logs", "m6d-private-holdout-run-summary.json");
-const validationPath = path.join(ROOT_DIR, "logs", "m6d-private-holdout-review-validation.json");
-const comparisonPath = path.join(ROOT_DIR, "logs", "m6d-private-holdout-arm-comparison.json");
+const privateDir = path.resolve(ROOT_DIR, process.env.REVIEW_PRIVATE_DIR || path.join("test", "private", "m6d-holdout"));
+const packetPath = path.join(privateDir, process.env.REVIEW_PACKET_FILE || "blind_packet.json");
+const keyPath = path.join(privateDir, process.env.REVIEW_KEY_FILE || "unmask_key.json");
+const scoresPath = path.join(privateDir, process.env.REVIEW_SCORES_FILE || "blind_review_scores.jsonl");
+const runLogPath = path.resolve(ROOT_DIR, process.env.REVIEW_RUN_LOG || path.join("logs", "m6d-private-holdout-runs.jsonl"));
+const runSummaryPath = path.resolve(ROOT_DIR, process.env.REVIEW_RUN_SUMMARY || path.join("logs", "m6d-private-holdout-run-summary.json"));
+const validationPath = path.resolve(ROOT_DIR, process.env.REVIEW_VALIDATION || path.join("logs", "m6d-private-holdout-review-validation.json"));
+const comparisonPath = path.resolve(ROOT_DIR, process.env.REVIEW_COMPARISON || path.join("logs", "m6d-private-holdout-arm-comparison.json"));
+const reviewPrefix = process.env.REVIEW_PREFIX || "M6D";
+const reviewValidCheckpoint = process.env.REVIEW_VALID_CHECKPOINT || `${reviewPrefix}_REVIEW_SCHEMA_VALID`;
+const reviewInvalidCheckpoint = process.env.REVIEW_INVALID_CHECKPOINT || `${reviewPrefix}_REVIEW_SCHEMA_INVALID`;
+const comparisonCheckpoint = process.env.REVIEW_COMPARISON_CHECKPOINT || `${reviewPrefix}_BLIND_REVIEW_VALIDATED`;
 const arms = ["D", "A6", "AO"];
 const relevanceTier = {
   IRRELEVANT: 0,
@@ -36,7 +40,7 @@ async function readJsonl(filePath) {
       try {
         return JSON.parse(line);
       } catch (error) {
-        throw new Error(`M6D_REVIEW_JSONL_INVALID line=${index + 1}: ${error.message}`);
+        throw new Error(`${reviewPrefix}_REVIEW_JSONL_INVALID line=${index + 1}: ${error.message}`);
       }
     });
 }
@@ -219,7 +223,7 @@ function buildComparison(packet, key, scores, runs, runSummary) {
   const deltaDirect = aoDirectQuestions - a6DirectQuestions;
   const deltaUsable = armQuality.AO.usable_selected_count - armQuality.A6.usable_selected_count;
   return {
-    checkpoint: "M6D_BLIND_REVIEW_VALIDATED",
+    checkpoint: comparisonCheckpoint,
     packet_id: packet.packet_id,
     validation: {
       score_count: scores.length,
@@ -257,7 +261,7 @@ async function main() {
   ]);
   const indexed = validateAndIndex({ packet, key, scores });
   const validation = {
-    checkpoint: indexed.issues.length === 0 ? "M6D_REVIEW_SCHEMA_VALID" : "M6D_REVIEW_SCHEMA_INVALID",
+    checkpoint: indexed.issues.length === 0 ? reviewValidCheckpoint : reviewInvalidCheckpoint,
     packet_id: packet.packet_id,
     score_count: scores.length,
     sample_count: packet.samples?.length || 0,

@@ -2,9 +2,9 @@
 
 ## 상태
 
-`PH_AWAITING_EXTERNAL_BLIND_REVIEW`
+`PH_BLIND_REVIEW_VALIDATED`
 
-PH01–PH30을 기존 M6D evidence와 분리한 private holdout으로 실행하고, 외부 reviewer용 blind packet을 생성했다. reviewer scores가 들어오기 전에는 arm unmask와 품질 결론을 수행하지 않는다.
+PH01–PH30을 기존 M6D evidence와 분리한 private holdout으로 실행하고, 외부 reviewer용 blind packet을 생성했다. 외부 reviewer score 수신 후 schema 검증과 arm unmask까지 완료했다. 세부 품질 비교는 [PH blind review report](PH_PRIVATE_BLIND_REVIEW_REPORT.md)에 기록했다.
 
 ## 실행 범위
 
