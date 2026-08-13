@@ -2,20 +2,30 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadDotenv } from "dotenv";
+import { buildLegalMcpEnv, buildRuntimeEnv } from "../../runtimeEnv.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { LEGAL_TOOL_NAMES, createLegalToolGateway } from "../legalToolGateway.js";
-import { createEvidenceLedger } from "../evidenceLedger.js";
-import { createSafetyController } from "../safety.js";
-import { createTelemetry } from "../telemetry.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const upstreamEntry = path.join(rootDir, "node_modules", "korean-law-mcp", "build", "index.js");
 const dotenvResult = loadDotenv({ path: path.join(rootDir, ".env"), processEnv: {}, quiet: true });
-if (!process.env.LAW_OC && dotenvResult.parsed?.LAW_OC) process.env.LAW_OC = dotenvResult.parsed.LAW_OC;
+const bridgeEnv = buildRuntimeEnv(process.env, {
+  CASE_FINDER_SKIP_DOTENV: "1",
+  ...(dotenvResult.parsed?.LAW_OC ? { LAW_OC: dotenvResult.parsed.LAW_OC } : {}),
+  ...(process.env.LEGAL_MCP_LOG_PATH ? { LEGAL_MCP_LOG_PATH: process.env.LEGAL_MCP_LOG_PATH } : {}),
+});
+for (const key of Object.keys(process.env)) {
+  if (!Object.prototype.hasOwnProperty.call(bridgeEnv, key)) delete process.env[key];
+}
+Object.assign(process.env, bridgeEnv);
+
+const { LEGAL_TOOL_NAMES, createLegalToolGateway } = await import("../legalToolGateway.js");
+const { createEvidenceLedger } = await import("../evidenceLedger.js");
+const { createSafetyController } = await import("../safety.js");
+const { createTelemetry } = await import("../telemetry.js");
 
 const allowedTools = new Set(LEGAL_TOOL_NAMES);
 const ledger = createEvidenceLedger({ provider: "codex_luna_stdio" });
@@ -28,7 +38,7 @@ const upstream = new Client(
 const upstreamTransport = new StdioClientTransport({
   command: process.execPath,
   args: [upstreamEntry],
-  env: { ...process.env },
+  env: buildLegalMcpEnv(process.env, process.env.LAW_OC),
 });
 await upstream.connect(upstreamTransport);
 const upstreamTools = (await upstream.listTools()).tools || [];

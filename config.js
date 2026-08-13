@@ -1,6 +1,8 @@
-import "dotenv/config";
+import { config as loadDotenv } from "dotenv";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+if (process.env.CASE_FINDER_SKIP_DOTENV !== "1") loadDotenv({ quiet: true });
 
 const currentFile = fileURLToPath(import.meta.url);
 const rootDir = path.dirname(currentFile);
