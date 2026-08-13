@@ -1,9 +1,8 @@
 import fs from "node:fs/promises";
-import fsSync from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { execFileSync } from "node:child_process";
 import { config, ROOT_DIR } from "../config.js";
+import { resolveCodexCommand } from "./codexResolver.js";
 
 const FINAL_SCHEMA = {
   name: "m9-native-final",
@@ -102,34 +101,6 @@ function delegatedResult(item) {
 function parseArguments(value) {
   if (typeof value !== "string") return value || {};
   try { return JSON.parse(value); } catch { return {}; }
-}
-
-function resolveCodexCommand() {
-  const configured = process.env.CODEX_CLI_PATH || config.codexCliPath;
-  if (process.platform === "win32" && configured === "codex") {
-    const appData = process.env.APPDATA || "";
-    const cliScript = appData
-      ? path.join(appData, "npm", "node_modules", "@openai", "codex", "bin", "codex.js")
-      : "";
-    if (cliScript && fsSync.existsSync(cliScript)) {
-      return { command: process.execPath, prefixArgs: [cliScript], shell: false };
-    }
-    try {
-      const discovered = execFileSync("where.exe", ["codex.exe"], { encoding: "utf8", windowsHide: true })
-        .split(/\r?\n/u)
-        .map((item) => item.trim())
-        .find(Boolean);
-      if (discovered) return { command: discovered, prefixArgs: [], shell: false };
-    } catch {
-      // Fall back to PATH resolution below.
-    }
-    return { command: "codex.exe", prefixArgs: [], shell: false };
-  }
-  return {
-    command: configured,
-    prefixArgs: [],
-    shell: process.platform === "win32" && configured.toLowerCase().endsWith(".cmd"),
-  };
 }
 
 function createSessionDirectory(baseDir, index) {

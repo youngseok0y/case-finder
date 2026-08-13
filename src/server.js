@@ -10,7 +10,7 @@ import { routeQuery } from "./router.js";
 import { defaultSearchAdapterRegistry } from "./searchAdapters/registry.js";
 import { toResultContract } from "./searchAdapters/resultContract.js";
 import { validateDirectResult, validateNaturalResult } from "./validator.js";
-import { PRODUCT_SERVICE } from "./productMessages.js";
+import { LUNA_RUNTIME_UNAVAILABLE_MESSAGE, PRODUCT_SERVICE } from "./productMessages.js";
 
 const indexPath = path.join(ROOT_DIR, "public", "index.html");
 const maxBodyBytes = 10_000;
@@ -98,6 +98,13 @@ async function handle(request, response) {
 
 const server = http.createServer((request, response) => {
   void handle(request, response).catch(async (error) => {
+    const lunaUnavailable = config.searchAdapter === "luna_native"
+      && ["CODEX_CLI_UNAVAILABLE", "ENOENT", "EACCES", "EPERM"].includes(error?.code);
+    if (lunaUnavailable && !response.headersSent) {
+      await logError("Luna Native runtime unavailable", error);
+      sendJson(response, 503, { ok: false, message: LUNA_RUNTIME_UNAVAILABLE_MESSAGE });
+      return;
+    }
     await logError("HTTP 요청 처리 실패", error);
     if (!response.headersSent) {
       sendJson(response, 500, { ok: false, message: "검색 처리 중 오류가 발생했습니다." });
