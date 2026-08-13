@@ -1,0 +1,35 @@
+import { createGeminiDAdapter } from "./geminiDAdapter.js";
+import { createGeminiA6Adapter } from "./geminiA6Adapter.js";
+import { createLunaNativeAdapter } from "./lunaNativeAdapter.js";
+
+export const SEARCH_ADAPTER_IDS = Object.freeze(["gemini_d", "gemini_a6", "luna_native"]);
+
+export class SearchAdapterUnsupportedError extends Error {
+  constructor(adapterId) {
+    super(`SEARCH_ADAPTER_UNSUPPORTED:${adapterId}`);
+    this.name = "SearchAdapterUnsupportedError";
+    this.code = "SEARCH_ADAPTER_UNSUPPORTED";
+    this.adapterId = adapterId;
+  }
+}
+
+export function createSearchAdapterRegistry({ adapters = {} } = {}) {
+  const entries = new Map([
+    ["gemini_d", createGeminiDAdapter()],
+    ["gemini_a6", createGeminiA6Adapter()],
+    ["luna_native", createLunaNativeAdapter()],
+  ]);
+  for (const [id, adapter] of Object.entries(adapters)) entries.set(id, adapter);
+  return {
+    ids() {
+      return [...entries.keys()];
+    },
+    resolve(adapterId = process.env.SEARCH_ADAPTER || "gemini_d") {
+      const adapter = entries.get(adapterId);
+      if (!adapter || typeof adapter.runNaturalQuery !== "function") throw new SearchAdapterUnsupportedError(adapterId);
+      return adapter;
+    },
+  };
+}
+
+export const defaultSearchAdapterRegistry = createSearchAdapterRegistry();

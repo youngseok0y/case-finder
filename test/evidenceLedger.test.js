@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createEvidenceLedger } from "../src/aoV2/evidenceLedger.js";
+import { createEvidenceLedger, parseProviderCompoundCaseNumber } from "../src/aoV2/evidenceLedger.js";
 
 test("EvidenceLedger enforces search then verified detail eligibility", () => {
   const ledger = createEvidenceLedger({ provider: "test" });
@@ -26,4 +26,45 @@ test("EvidenceLedger rejects unobserved detail and keeps law registry separate",
   assert.equal(ledger.isLawObserved({ mst: "M1" }), true);
   assert.equal(ledger.recordLawText({ mst: "M1" }).verified, true);
   assert.equal(ledger.snapshot().cases.length, 0);
+});
+
+test("EvidenceLedger derives compound aliases only from verified provider detail", () => {
+  assert.deepEqual(parseProviderCompoundCaseNumber("2014두12598, 12604"), {
+    rawCaseNumber: "2014두12598, 12604",
+    canonicalMembers: ["2014두12598", "2014두12604"],
+    acceptedEvidenceKeys: ["2014두12598|2014두12604", "2014두12598", "2014두12604"],
+    ambiguous: false,
+  });
+  const ledger = createEvidenceLedger({ provider: "test" });
+  ledger.recordDecisionSearch({
+    query: "compound",
+    domain: "precedent",
+    items: [{ id: "compound-1", caseNumber: "2014두12598" }],
+   });
+  assert.equal(ledger.getCase("2014두2604"), null);
+  const detail = ledger.recordDecisionDetail({
+    domain: "precedent",
+    id: "compound-1",
+    caseNumber: "2014두12598, 12604",
+    rawText: "provider verified raw detail",
+  });
+  assert.equal(detail.verified, true);
+  assert.equal(ledger.isFinalEligible("2014두12598,12604"), true);
+  assert.equal(ledger.isFinalEligible("2014두12604"), true);
+  assert.equal(ledger.isFinalEligible("2014두99999"), false);
+  assert.deepEqual(ledger.snapshot().cases[0].canonicalMembers, ["2014두12598", "2014두12604"]);
+});
+
+test("EvidenceLedger rejects ambiguous compound detail without creating aliases", () => {
+  const ledger = createEvidenceLedger({ provider: "test" });
+  ledger.recordDecisionSearch({ query: "compound", domain: "precedent", items: [{ id: "ambiguous", caseNumber: "2014두12598" }] });
+  const detail = ledger.recordDecisionDetail({
+    domain: "precedent",
+    id: "ambiguous",
+    caseNumber: "2014두12598, unknown",
+    rawText: "provider detail",
+  });
+  assert.equal(detail.verified, false);
+  assert.equal(ledger.isFinalEligible("2014두12598, unknown"), false);
+  assert.equal(ledger.isFinalEligible("2014두99999"), false);
 });

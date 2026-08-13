@@ -56,3 +56,25 @@ test("FinalSelectionGate dedupes and removes case numbers from intro", () => {
   assert.equal(result.intro, "");
   assert.equal(result.protocolDiagnostics.some((item) => item.code === "INTRO_CASE_NUMBER_REMOVED"), true);
 });
+
+test("FinalSelectionGate accepts verified provider compound members and full identity", () => {
+  const ledger = createEvidenceLedger({ provider: "test" });
+  ledger.recordDecisionSearch({
+    query: "compound",
+    domain: "precedent",
+    items: [{ id: "compound", caseNumber: "2014두12598" }],
+  });
+  ledger.recordDecisionDetail({
+    domain: "precedent",
+    id: "compound",
+    caseNumber: "2014두12598, 12604",
+    rawText: "provider verified raw detail",
+  });
+  const result = finalizeSelection({
+    selected: [{ case_no: "2014두12598,12604", match: "direct" }],
+    intro: "설명",
+  }, ledger);
+  assert.deepEqual(result.selected, [{ case_no: "2014두12598", match: "direct" }]);
+  assert.equal(result.output_valid, true);
+  assert.equal(result.model_protocol_clean, true);
+});
