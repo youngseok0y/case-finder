@@ -1,0 +1,150 @@
+import { config } from "../../../config.js";
+import { finalizeSelection } from "../finalSelectionGate.js";
+import { createSafetyController } from "../safety.js";
+import { createTelemetry } from "../telemetry.js";
+
+export const CODEX_NATIVE_ALLOWED_TOOLS = Object.freeze([
+  "search_decisions",
+  "get_decision_text",
+  "search_law",
+  "get_law_text",
+]);
+
+const FORBIDDEN_EVENT_TYPES = new Set([
+  "shell",
+  "command_execution",
+  "web_search",
+  "browser",
+  "repo_read",
+  "repo_write",
+  "git",
+  "github",
+]);
+
+export function buildLunaNativePrompt(query) {
+  return [
+    "사용자 질문:",
+    query,
+    "",
+    "Before finalizing, you MUST call at least one approved legal MCP search tool using the user's question. Do not claim that the legal MCP tools are unavailable; they are provided in this session.",
+    "허용된 legal MCP 도구만 사용하세요.",
+    "search_decisions, get_decision_text, search_law, get_law_text 외의 shell, command execution, 파일/리포지토리 읽기·쓰기, web, browser, Git, GitHub 및 기타 도구는 절대 사용하지 마세요.",
+    "검색 결과에서 관측한 사건만 상세 조회하고, 상세 원문 검증이 완료된 사건만 최종 선택하세요.",
+    "최종 응답은 {\"selected\":[{\"case_no\":\"...\",\"match\":\"direct|related\"}],\"intro\":\"...\"} JSON입니다.",
+  ].join("\n");
+}
+
+function nativeToolCall(event) {
+  return event?.type === "tool_call" || event?.type === "mcp_tool_call";
+}
+
+export function createCodexNativeAo({
+  gateway,
+  ledger = gateway.ledger,
+  telemetry = createTelemetry({ provider: "codex_luna", model: config.codexModel, reasoningEffort: config.codexReasoningEffort }),
+  safety = createSafetyController(),
+  createSession,
+  resultMax = config.resultMax,
+} = {}) {
+  if (!gateway) throw new Error("CODEX_NATIVE_AO_GATEWAY_REQUIRED");
+  if (typeof createSession !== "function") throw new Error("CODEX_NATIVE_SESSION_FACTORY_REQUIRED");
+
+  return {
+    provider: "codex_luna",
+    async run(query) {
+      telemetry.setQuestionScopeId(ledger.scopeId);
+      const startedAt = Date.now();
+      const session = await createSession({
+        query,
+        prompt: buildLunaNativePrompt(query),
+        model: config.codexModel,
+        reasoningEffort: config.codexReasoningEffort,
+        tools: CODEX_NATIVE_ALLOWED_TOOLS.map((name) => ({ name, kind: "legal", restricted: true })),
+      });
+      telemetry.setSessionId(session?.sessionId || session?.session_id || null);
+      let closed = false;
+      try {
+        while (true) {
+          safety.assertCanContinue();
+          const event = await session.next();
+          if (!event) throw new Error("CODEX_NATIVE_SESSION_ENDED_WITHOUT_FINAL");
+          if (event.type === "session_timeout") throw new Error("M8_CODEX_SESSION_TIMEOUT");
+          if (FORBIDDEN_EVENT_TYPES.has(event.type)) {
+            telemetry.recordToolCall(event.type, { rejected: true, errorCode: "FORBIDDEN_TOOL" });
+            telemetry.markProtocolInvalid();
+            telemetry.setStopReason("AO_V2_LUNA_TOOL_CONTAMINATION");
+            return {
+              provider: "codex_luna",
+              architecture: "AO_V2",
+              selected: [],
+              intro: "",
+              rejectedSelected: [],
+              protocolDiagnostics: [{ code: "AO_V2_LUNA_TOOL_CONTAMINATION", type: event.type }],
+              output_valid: false,
+              model_protocol_clean: false,
+              selection_repaired: false,
+              protocolPass: false,
+              ledger: ledger.snapshot(),
+              telemetry: telemetry.snapshot(ledger),
+              elapsed_ms: Date.now() - startedAt,
+            };
+          }
+          if (nativeToolCall(event)) {
+            const name = event.name || event.tool_name;
+            if (!CODEX_NATIVE_ALLOWED_TOOLS.includes(name)) {
+              telemetry.recordToolCall(name, { rejected: true, errorCode: "FORBIDDEN_TOOL" });
+              telemetry.markProtocolInvalid();
+              telemetry.setStopReason("AO_V2_LUNA_TOOL_CONTAMINATION");
+              return {
+                provider: "codex_luna",
+                architecture: "AO_V2",
+                selected: [],
+                intro: "",
+                rejectedSelected: [],
+                protocolDiagnostics: [{ code: "AO_V2_LUNA_TOOL_CONTAMINATION", tool: name }],
+                output_valid: false,
+                model_protocol_clean: false,
+                selection_repaired: false,
+                protocolPass: false,
+                ledger: ledger.snapshot(),
+                telemetry: telemetry.snapshot(ledger),
+                elapsed_ms: Date.now() - startedAt,
+              };
+            }
+            if (event.delegated === true) {
+              telemetry.recordToolCall(name, {});
+              safety.noteEvidenceCount(ledger.snapshot().cases.length + ledger.snapshot().laws.length);
+              continue;
+            }
+            const result = await gateway.execute(name, event.arguments || event.args || {});
+            if (typeof session.respondToToolCall !== "function") throw new Error("CODEX_NATIVE_SESSION_TOOL_RESPONSE_REQUIRED");
+            await session.respondToToolCall({ callId: event.call_id || event.callId || null, name, result });
+            safety.noteEvidenceCount(ledger.snapshot().cases.length + ledger.snapshot().laws.length);
+            continue;
+          }
+          if (event.type === "final") {
+            telemetry.setSessionId(event.session_id || event.sessionId || session?.sessionId || null);
+            if (event.usage || event.elapsedMs) telemetry.recordModelTurn({ usage: event.usage || {}, elapsedMs: event.elapsedMs || 0 });
+            const attempt = event.selection || event.value || event;
+            const gated = finalizeSelection(attempt, ledger, { resultMax });
+            telemetry.recordSelectionGate(gated);
+            telemetry.setStopReason("MODEL_FINAL");
+            return {
+              provider: "codex_luna",
+              architecture: "AO_V2",
+              ...gated,
+              ledger: ledger.snapshot(),
+              telemetry: telemetry.snapshot(ledger),
+              elapsed_ms: Date.now() - startedAt,
+            };
+          }
+        }
+      } finally {
+        if (!closed && typeof session.close === "function") {
+          closed = true;
+          await session.close();
+        }
+      }
+    },
+  };
+}
