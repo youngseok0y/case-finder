@@ -1,4 +1,6 @@
 import { logValidation } from "./log.js";
+import { deriveTerminalState } from "./searchAdapters/resultContract.js";
+import { SAFETY_REJECTED_MESSAGE } from "./productMessages.js";
 import {
   caseNumberKey,
   caseNumberMatches,
@@ -32,7 +34,12 @@ export async function validateDirectResult(result) {
     }
   }
 
-  return { ...result, items: validItems, validationFailures: failures };
+  return {
+    ...result,
+    items: validItems,
+    validationFailures: failures,
+    terminalState: deriveTerminalState({ ...result, validationFailures: failures }, true, validItems),
+  };
 }
 
 export async function validateNaturalResult(result) {
@@ -43,7 +50,7 @@ export async function validateNaturalResult(result) {
       items: [],
       terminalState: "SAFETY_REJECTED",
       validationFailures: result.validationFailures || [],
-      fallbackLabel: "검색 결과를 안전하게 검증하지 못해 결과를 표시하지 않았습니다. 다시 검색해 주세요.",
+      fallbackLabel: SAFETY_REJECTED_MESSAGE,
     };
   }
   const candidateNumbers = result.candidateCaseNumbers || [];
@@ -82,5 +89,6 @@ export async function validateNaturalResult(result) {
     selected: validSelections,
     items: validItems,
     validationFailures: failures,
+    terminalState: deriveTerminalState({ ...result, validationFailures: failures }, result.outputValid !== false, validItems),
   };
 }

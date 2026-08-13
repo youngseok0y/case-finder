@@ -66,6 +66,78 @@ test("Luna Native adapter → contract → validator → renderer keeps verified
   assert.match(html, /판시내용/u);
 });
 
+test("Luna adapter preserves its input query for normal and safety results", async () => {
+  const inputQuery = "Luna query preservation";
+  const normalAdapter = createLunaNativeAdapter({
+    run: async () => ({
+      selected: [{ case_no: caseItem.caseNumber, match: "direct" }],
+      items: [caseItem],
+      candidateCaseNumbers: [caseItem.caseNumber],
+    }),
+  });
+  const normalResult = await validated(await normalAdapter.runNaturalQuery(inputQuery));
+  const normalHtml = renderResults(normalResult);
+  assert.equal(normalResult.query, inputQuery);
+  assert.match(normalHtml, /Luna query preservation/u);
+
+  const safetyAdapter = createLunaNativeAdapter({
+    run: async () => ({
+      output_valid: false,
+      protocol_diagnostics: [{ code: "AO_V2_LUNA_TOOL_CONTAMINATION" }],
+    }),
+  });
+  const safetyResult = await validated(await safetyAdapter.runNaturalQuery(inputQuery));
+  const safetyHtml = renderResults(safetyResult);
+  assert.equal(safetyResult.query, inputQuery);
+  assert.match(safetyHtml, /Luna query preservation/u);
+  assert.match(safetyHtml, /안전하게 검증하지 못해 결과를 표시하지 않았습니다/u);
+});
+
+test("Luna adapter does not expose exploration-only law evidence", async () => {
+  const explorationLaw = {
+    lawName: "탐색 중 확인한 법률",
+    article: "",
+    link: "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=123",
+  };
+  const adapter = createLunaNativeAdapter({
+    createSearch: () => ({
+      async runWithContext() {
+        return {
+          result: {
+            selected: [{ case_no: caseItem.caseNumber, match: "direct" }],
+            items: [{ ...caseItem, lawReferences: [explorationLaw] }],
+            lawReferences: [],
+          },
+          ledger: {
+            getObservedCaseNumbers() { return [caseItem.caseNumber]; },
+            snapshot() { return { laws: [{ ...explorationLaw, observed: true, textOpened: true }] }; },
+          },
+        };
+      },
+    }),
+  });
+  const result = await validated(await adapter.runNaturalQuery("법령 탐색 provenance"));
+  const html = renderResults(result);
+  assert.deepEqual(result.lawReferences, []);
+  assert.deepEqual(result.items[0].lawReferences, []);
+  assert.doesNotMatch(html, /탐색 중 확인한 법률/u);
+});
+
+test("all validation failures are SEARCH_FAILED, not ordinary NO_RESULT", async () => {
+  const rejected = toResultContract({
+    query: "검증 실패 terminal",
+    selected: [{ caseNumber: caseItem.caseNumber, match: "direct" }],
+    items: [caseItem],
+    candidateCaseNumbers: ["2020다999999"],
+  }, { adapterId: "gemini_d", provider: "gemini", architecture: "D" });
+  const result = await validated(rejected);
+  const html = renderResults(result);
+  assert.equal(result.items.length, 0);
+  assert.equal(result.terminalState, "SEARCH_FAILED");
+  assert.match(html, /판례 후보를 확인했지만 상세 원문 검증에 실패해 결과를 표시하지 않았습니다/u);
+  assert.doesNotMatch(html, /정확히 일치하는 판례를 찾지 못했습니다/u);
+});
+
 test("outputValid=false is a safety terminal, not an ordinary NO_RESULT", async () => {
   const rejected = toResultContract({
     output_valid: false,

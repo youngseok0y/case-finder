@@ -24,7 +24,8 @@ function arrayOr(value, fallback = []) {
 }
 
 function firstArray(...values) {
-  return values.find((value) => Array.isArray(value)) || [];
+  const value = values.find((candidate) => Array.isArray(candidate));
+  return value ? [...value] : [];
 }
 
 function nullableBoolean(canonicalValue, legacyValue) {
@@ -43,10 +44,12 @@ function executionPin(result, metadata) {
   return metadata.executionPin || result.executionPin || result.execution_pin || null;
 }
 
-function terminalState(result, outputValid, items) {
+export function deriveTerminalState(result, outputValid, items) {
   if (!outputValid) return "SAFETY_REJECTED";
   if (result.error) return "SEARCH_FAILED";
-  if (items.length > 0 && Array.isArray(result.validationFailures) && result.validationFailures.length > 0) return "PARTIAL_VERIFIED";
+  if (Array.isArray(result.validationFailures) && result.validationFailures.length > 0) {
+    return items.length > 0 ? "PARTIAL_VERIFIED" : "SEARCH_FAILED";
+  }
   return items.length > 0 ? "SUCCESS" : "NO_RESULT";
 }
 
@@ -85,7 +88,7 @@ export function toResultContract(result = {}, metadata = {}) {
     rejectedSelected: arrayOr(result.rejectedSelected || result.rejected_selected),
     executionPin: executionPin(result, metadata),
     telemetry,
-    terminalState: terminalState({ ...result, validationFailures }, outputValid, items),
+    terminalState: deriveTerminalState({ ...result, validationFailures }, outputValid, items),
     error: text(result.error),
   };
   assertResultContract(contract);
