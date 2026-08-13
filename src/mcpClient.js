@@ -36,6 +36,15 @@ function timeout(promise, timeoutMs) {
   ]);
 }
 
+export async function closeStaleTransport(staleTransport, onError = () => {}) {
+  if (!staleTransport || typeof staleTransport.close !== "function") return;
+  try {
+    await staleTransport.close();
+  } catch (error) {
+    onError(error);
+  }
+}
+
 async function connectOnce() {
   const params = serverParameters();
   const nextTransport = new StdioClientTransport(params);
@@ -48,8 +57,10 @@ async function connectOnce() {
     void logError("korean-law-mcp 프로세스 오류", error);
   };
   nextTransport.onclose = () => {
-    client = null;
-    transport = null;
+    if (transport === nextTransport) {
+      client = null;
+      transport = null;
+    }
     logInfo("korean-law-mcp 연결이 종료됐습니다.");
   };
 
@@ -88,8 +99,12 @@ export async function callTool(name, args = {}, timeoutMs = config.mcpTimeoutMs)
       await startMcp();
       return await timeout(client.callTool({ name, arguments: args }), timeoutMs);
     } catch (error) {
+      const staleTransport = transport;
       client = null;
       transport = null;
+      await closeStaleTransport(staleTransport, (closeError) => {
+        void logError("오래된 korean-law-mcp 연결 정리 실패", closeError);
+      });
       if (attempt === 1) throw error;
       await logError(`MCP 호출 실패 후 재기동합니다: ${name}`, error);
     }
@@ -105,7 +120,10 @@ export function getMcpStatus() {
 }
 
 export async function closeMcp() {
-  if (transport) await transport.close();
+  const staleTransport = transport;
   client = null;
   transport = null;
+  await closeStaleTransport(staleTransport, (error) => {
+    void logError("korean-law-mcp 연결 종료 실패", error);
+  });
 }

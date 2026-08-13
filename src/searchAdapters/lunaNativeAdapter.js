@@ -4,14 +4,41 @@ import { config } from "../../config.js";
 import { toResultContract } from "./resultContract.js";
 
 export const LUNA_NATIVE_EXECUTION_PIN = Object.freeze({
-  adapter_id: "luna_native",
+  adapterId: "luna_native",
   provider: "codex_luna",
   architecture: "AO_V2_NATIVE",
   runtime: "codex_cli",
   model: config.codexModel,
-  reasoning_effort: config.codexReasoningEffort,
+  reasoningEffort: config.codexReasoningEffort,
   persistence: "adapter_scoped",
 });
+
+function nativeLawLink(mst) {
+  return /^\d+$/u.test(String(mst || ""))
+    ? `https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=${encodeURIComponent(mst)}`
+    : "";
+}
+
+function buildLunaLawReferences(result, ledger) {
+  const references = Array.isArray(result.lawReferences) ? [...result.lawReferences] : [];
+  if (!ledger || typeof ledger.snapshot !== "function") return references;
+  for (const law of ledger.snapshot().laws || []) {
+    if (!law.observed || !law.textOpened) continue;
+    references.push({
+      lawName: law.title || "",
+      article: "",
+      link: nativeLawLink(law.mst),
+      providerId: law.lawId || law.mst || "",
+    });
+  }
+  const seen = new Set();
+  return references.filter((law) => {
+    const key = `${law.lawName || ""}|${law.article || ""}|${law.link || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return Boolean(law.lawName || law.link);
+  });
+}
 
 function nativeDecisionLink(domain, providerId) {
   const id = String(providerId || "");
@@ -76,7 +103,7 @@ export function createLunaNativeAdapter({
   }),
 } = {}) {
   const persistentSearch = run ? null : createSearch({ provider: "codex_luna" });
-  if (!run && (!persistentSearch || typeof persistentSearch.runAgenticSearchV2 !== "function")) {
+  if (!run && (!persistentSearch || typeof persistentSearch.runWithContext !== "function")) {
     throw new Error("LUNA_NATIVE_SEARCH_FACTORY_INVALID");
   }
   return {
@@ -85,13 +112,16 @@ export function createLunaNativeAdapter({
     architecture: "AO_V2_NATIVE",
     executionPin: LUNA_NATIVE_EXECUTION_PIN,
     async runNaturalQuery(query, options = {}) {
-      const result = run
-        ? await run(query, { ...options, provider: "codex_luna" })
-        : await persistentSearch.runAgenticSearchV2(query);
-      const items = run ? result.items : buildLunaResultItems(result, persistentSearch.lastRun?.ledger);
-      return toResultContract({ ...result, items }, {
+      const context = run
+        ? { result: await run(query, { ...options, provider: "codex_luna" }), ledger: null }
+        : await persistentSearch.runWithContext(query);
+      const result = context.result || {};
+      const ledger = context.ledger || null;
+      const items = buildLunaResultItems(result, ledger);
+      const candidateCaseNumbers = ledger?.getObservedCaseNumbers?.() || result.candidateCaseNumbers || [];
+      return toResultContract({ ...result, items, candidateCaseNumbers, lawReferences: buildLunaLawReferences(result, ledger) }, {
         adapterId: "luna_native",
-        provider: "luna",
+        provider: "codex_luna",
         architecture: "AO_V2_NATIVE",
         executionPin: LUNA_NATIVE_EXECUTION_PIN,
       });

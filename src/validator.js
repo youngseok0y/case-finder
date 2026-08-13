@@ -36,6 +36,16 @@ export async function validateDirectResult(result) {
 }
 
 export async function validateNaturalResult(result) {
+  if (result.outputValid === false) {
+    return {
+      ...result,
+      selected: [],
+      items: [],
+      terminalState: "SAFETY_REJECTED",
+      validationFailures: result.validationFailures || [],
+      fallbackLabel: "검색 결과를 안전하게 검증하지 못해 결과를 표시하지 않았습니다. 다시 검색해 주세요.",
+    };
+  }
   const candidateNumbers = result.candidateCaseNumbers || [];
   const validItems = [];
   const validSelections = [];

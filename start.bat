@@ -60,8 +60,14 @@ exit /b 0
 :startServer
 call :findPortPid
 if defined PORT_PID (
-  echo Existing process !PORT_PID! is using port %APP_PORT%.
-  echo Stopping existing process...
+  call :checkCaseFinderHealth
+  if errorlevel 1 (
+    echo Port %APP_PORT% is already used by an unknown process (PID !PORT_PID!).
+    echo Refusing to terminate a foreign process.
+    exit /b 1
+  )
+  echo Existing Case Finder process !PORT_PID! is using port %APP_PORT%.
+  echo Stopping the existing Case Finder process...
   taskkill /PID !PORT_PID! /T /F >nul 2>&1
   if errorlevel 1 (
     echo Failed to stop process !PORT_PID!.
@@ -89,8 +95,12 @@ for /l %%S in (1,1,60) do (
   powershell.exe -NoProfile -Command "Start-Sleep -Seconds 1"
 )
 echo Server did not open port %APP_PORT% within 60 seconds.
-echo Check logs/server-error.log.
+echo Check logs/error.log.
 exit /b 1
+
+:checkCaseFinderHealth
+powershell.exe -NoProfile -Command "$u = 'http://127.0.0.1:%APP_PORT%/health'; try { $r = Invoke-WebRequest -UseBasicParsing -Uri $u -TimeoutSec 2; if ($r.StatusCode -eq 200 -and $r.Content -match '\"service\"\s*:\s*\"case-finder\"') { exit 0 } else { exit 1 } } catch { exit 1 }"
+exit /b %errorlevel%
 
 :waitForPortFree
 for /l %%S in (1,1,10) do (

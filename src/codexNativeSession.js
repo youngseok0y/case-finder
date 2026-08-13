@@ -29,6 +29,33 @@ const FINAL_SCHEMA = {
 
 const FORBIDDEN_EVENT_TYPES = /(command_execution|shell|computer|file_search|web_search|browser|repo|git|github)/iu;
 
+const CODEX_CHILD_ENV_KEYS = Object.freeze([
+  "PATH",
+  "PATHEXT",
+  "SYSTEMROOT",
+  "WINDIR",
+  "COMSPEC",
+  "TEMP",
+  "TMP",
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "HOME",
+  "SYSTEMDRIVE",
+  "CODEX_HOME",
+]);
+
+export function buildCodexChildEnv(source = process.env, { legalMcpLogPath = "" } = {}) {
+  const env = {};
+  for (const key of CODEX_CHILD_ENV_KEYS) {
+    if (typeof source?.[key] === "string" && source[key]) env[key] = source[key];
+  }
+  if (legalMcpLogPath) env.LEGAL_MCP_LOG_PATH = legalMcpLogPath;
+  return env;
+}
+
 function tomlString(value) {
   return JSON.stringify(String(value));
 }
@@ -139,7 +166,7 @@ export function createCodexCliSessionFactory({
     const codexCommand = resolveCodexCommand();
     const child = spawn(codexCommand.command, [...codexCommand.prefixArgs, ...args], {
       cwd: workdir,
-      env: { ...process.env, LEGAL_MCP_LOG_PATH: proxyLogPath },
+      env: buildCodexChildEnv(process.env, { legalMcpLogPath: proxyLogPath }),
       windowsHide: true,
       shell: codexCommand.shell,
       stdio: ["pipe", "pipe", "pipe"],

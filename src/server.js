@@ -8,6 +8,7 @@ import { logError, logInfo } from "./log.js";
 import { renderResults } from "./renderer.js";
 import { routeQuery } from "./router.js";
 import { defaultSearchAdapterRegistry } from "./searchAdapters/registry.js";
+import { toResultContract } from "./searchAdapters/resultContract.js";
 import { validateDirectResult, validateNaturalResult } from "./validator.js";
 
 const indexPath = path.join(ROOT_DIR, "public", "index.html");
@@ -45,6 +46,7 @@ async function handle(request, response) {
 
   if (request.method === "GET" && url.pathname === "/health") {
     sendJson(response, 200, {
+      service: "case-finder",
       ok: true,
       node: process.version,
       expectedNode: EXPECTED_NODE_VERSION,
@@ -74,15 +76,17 @@ async function handle(request, response) {
       return;
     }
     const adapter = defaultSearchAdapterRegistry.resolve(config.searchAdapter);
-    const natural = await adapter.runNaturalQuery(query);
-    const validated = await validateNaturalResult(natural);
+    const adapterResult = await adapter.runNaturalQuery(query);
+    const validated = await validateNaturalResult(adapterResult);
+    const publicResult = toResultContract(validated);
     sendJson(response, 200, {
       ok: true,
+      service: "case-finder",
       stage: config.searchAdapter === "luna_native" ? "LUNA_NATIVE" : "GEMINI_D",
       route: "natural",
       query,
       html: renderResults(validated),
-      result: validated,
+      result: publicResult,
     });
     return;
   }

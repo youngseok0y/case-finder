@@ -4,13 +4,13 @@ import { config } from "../../config.js";
 import { toResultContract } from "./resultContract.js";
 
 export const GEMINI_D_EXECUTION_PIN = Object.freeze({
-  adapter_id: "gemini_d",
+  adapterId: "gemini_d",
   provider: "gemini",
   architecture: "D",
   runtime: "gemini",
   model: config.geminiModel,
-  pipeline_mode: "deterministic",
-  gemini_request_budget: 2,
+  pipelineMode: "deterministic",
+  geminiRequestBudget: 2,
 });
 
 function pinnedDependencies(options) {

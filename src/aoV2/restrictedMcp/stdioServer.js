@@ -14,7 +14,8 @@ import { createTelemetry } from "../telemetry.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const upstreamEntry = path.join(rootDir, "node_modules", "korean-law-mcp", "build", "index.js");
-loadDotenv({ path: path.join(rootDir, ".env"), quiet: true });
+const dotenvResult = loadDotenv({ path: path.join(rootDir, ".env"), processEnv: {}, quiet: true });
+if (!process.env.LAW_OC && dotenvResult.parsed?.LAW_OC) process.env.LAW_OC = dotenvResult.parsed.LAW_OC;
 
 const allowedTools = new Set(LEGAL_TOOL_NAMES);
 const ledger = createEvidenceLedger({ provider: "codex_luna_stdio" });

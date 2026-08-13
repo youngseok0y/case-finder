@@ -18,25 +18,33 @@ export function createAgenticSearchV2({
   adapterOptions = {},
 } = {}) {
   let lastRun = null;
+  async function runWithContext(query) {
+    const ledger = createEvidenceLedger({ provider });
+    const telemetry = createTelemetry({
+      provider,
+      model: provider === "codex_luna" ? config.codexModel : config.geminiModel,
+      reasoningEffort: provider === "codex_luna" ? config.codexReasoningEffort : null,
+      questionScopeId: ledger.scopeId,
+    });
+    const safety = createSafetyController();
+    const gateway = createLegalToolGateway({ ...gatewayOptions, ledger, telemetry, safety });
+    if (provider !== "codex_luna") throw new Error(`AO_V2_PROVIDER_RETIRED:${provider}`);
+    const adapter = createCodexNativeAo({ ...adapterOptions, gateway, ledger, telemetry, safety });
+    const result = await adapter.run(query);
+    const context = { result, ledger, telemetry, safety, gateway };
+    // This is retained for diagnostics/backward compatibility only. Product
+    // correctness must use the context returned by this invocation.
+    lastRun = context;
+    return context;
+  }
   return {
     provider,
     get lastRun() {
       return lastRun;
     },
+    runWithContext,
     async runAgenticSearchV2(query) {
-      const ledger = createEvidenceLedger({ provider });
-      const telemetry = createTelemetry({
-        provider,
-        model: provider === "codex_luna" ? config.codexModel : config.geminiModel,
-        reasoningEffort: provider === "codex_luna" ? config.codexReasoningEffort : null,
-        questionScopeId: ledger.scopeId,
-      });
-      const safety = createSafetyController();
-      const gateway = createLegalToolGateway({ ...gatewayOptions, ledger, telemetry, safety });
-      if (provider !== "codex_luna") throw new Error(`AO_V2_PROVIDER_RETIRED:${provider}`);
-      const adapter = createCodexNativeAo({ ...adapterOptions, gateway, ledger, telemetry, safety });
-      lastRun = { ledger, telemetry, safety, gateway };
-      return adapter.run(query);
+      return (await runWithContext(query)).result;
     },
   };
 }

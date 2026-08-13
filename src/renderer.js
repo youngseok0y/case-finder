@@ -51,6 +51,9 @@ function renderCase(item, showDetail) {
 }
 
 export function renderResults(result) {
+  if (result.outputValid === false || result.terminalState === "SAFETY_REJECTED") {
+    return `<div class="fable-results"><p class="query"><strong>사용자 질문</strong> : ${escapeHtml(result.query)}</p><p class="error">검색 결과를 안전하게 검증하지 못해 결과를 표시하지 않았습니다. 다시 검색해 주세요.</p><p class="disclaimer">본 결과는 법제처 국가법령정보 Open API 데이터를 그대로 표시한 것으로, 법률 자문이 아닙니다.</p></div>`;
+  }
   const items = result.items || [];
   const laws = [];
   const seenLaws = new Set();
