@@ -6,7 +6,7 @@ Branch: `m8-provider-native-ao-v2`
 
 Base: `69db8ca634bfaa0daaf79b916736c99558d8817c` (`m7-codex-luna-medium-eval`)
 
-Checkpoint: `M8_GOLDEN17_DIAGNOSTIC_COMPLETE`
+Checkpoint: `M8_FINAL_AUDIT_COMPLETE`
 
 Next checkpoint: `M8_USER_REVIEW_REQUIRED`
 
@@ -180,7 +180,7 @@ Gemini aggregate:
 
 질문별 `ledger_scope_id`는 Luna 최종 10개 record에서 모두 고유했고, 오프라인 isolation fixture는 질문 A에서 관측한 ID가 질문 B detail에 사용되지 않으며 scope가 분리됨을 확인했어요. 따라서 persistent Codex session을 사용하더라도 ledger와 observed-id scope가 질문 단위로 격리되는 계약을 확인했어요.
 
-제품 `main` 통합, commit/push는 수행하지 않았어요.
+제품 `main` 통합은 수행하지 않았어요. M8 작업 branch의 구현·평가 보고서는 commit/push 완료 상태예요.
 
 ## 8. Fresh Golden-17 Comparison
 
@@ -201,7 +201,7 @@ M8 protocol failure 원인:
 | Gemini | `SAFETY_NO_PROGRESS` | 1 | 진행 watchdog가 중단하여 output invalid로 종료함. |
 | Luna | `INTRO_CASE_NUMBER_REMOVED` | 4 | 검증된 선택과 별개로 intro에 사건번호를 작성하여 host가 intro를 제거함. |
 | Luna | `RESULT_MAX_TRUNCATED` | 1 | result max를 초과한 선택을 host가 잘라냄. |
-| Luna | `CASE_NOT_OBSERVED` | 2 | 검색에서 관측되지 않은 사건번호를 최종 선택하여 host가 제거함. |
+| Luna | `CASE_NOT_OBSERVED` | 2 | 모델 selection의 복합 사건번호가 ledger의 exact observed key와 일치하지 않아 host가 제거함. |
 
 M7 동일 17문항과의 참고 비교:
 
@@ -220,3 +220,44 @@ M8 fresh golden-17 raw artifacts:
 - Luna summary/records: `test/private/m8-golden17-live-final-luna/luna/golden17-summary.json`, `golden17-records.jsonl`
 
 이번 fresh run은 strict accuracy 비교를 위한 실행이며, validator 완화나 intro 우회 설계는 적용하지 않았어요.
+
+## 9. Post-Live Regression and Repair Audit
+
+이번 audit은 prompt, validator, gateway, ranking, selection policy를 변경하지 않고 private raw artifact를 재분석한 결과예요.
+
+### 9.1 Gemini strict-loss first-loss audit
+
+대상은 M7 G-AO에서 strict hit였으나 M8 Gemini AO-v2에서 strict miss가 된 4문항이에요. 약어는 `S=search_decisions`, `L=search_law`, `D=get_decision_text`, `F=final`이에요.
+
+| question | expected | M7 candidate/detail/final | M7 tool sequence | M8 candidate/detail/final | M8 tool sequence | M8 gateway rejection / safety stop | first loss |
+|---|---|---|---|---|---|---|---|
+| `related-medical-explanation` | `2021다265010` | yes / yes / gold | `S×4 → D(2010나24017) → S → D(2009다102209) → S×2 → D(gold) → F` | no / no / `2011나9792` | `S×2 → D(2011나9792) → F` | 0 / none | candidate discovery |
+| `statute-age-discrimination-4-4` | `2017다292343` | yes / yes / gold | `S → D(2021다241359) → D(gold) → F` | yes / no / `2021다241359`; gold rejected as unverified | `S → D(2021다241359) → F` | 0 / none | gold detail not opened |
+| `statute-medical-service-24-2` | `2021다265010` | yes / yes / gold | `S → D(gold) → F` | yes / no / `2020다218925` | `L×2 → S×2 → D(2020다218925) → F` | 0 / none | gold detail not opened |
+| `domain-admin-information-disclosure` | `2017두69892` | yes / yes / gold | `S×2 → D(2022두65559) → S → D(gold) → F` | no / no / `2022두65559` | `S → D(2022두65559) → F` | 0 / none | candidate discovery |
+
+요약하면 M8 strict-loss 4건은 gateway rejection이나 safety stop으로 발생하지 않았어요. 후보 미발견 2건과 후보 발견 후 gold detail 미개방 2건으로 나뉘며, prompt 수정은 이번 audit 범위에 포함하지 않았어요.
+
+### 9.2 Luna repair taxonomy
+
+| taxonomy | question(s) | count | strict impact |
+|---|---|---:|---|
+| `FORMAT_ONLY / INTRO_CASE_NUMBER_REMOVED` | `related-parental-leave-return`, `related-medical-explanation`, `domain-constitutional-adultery`, `sparse-relocation` | 4 | 0건. 2건은 gold selection이 유지되어 strict hit, 2건은 repair 전부터 miss |
+| `FORMAT_ONLY / RESULT_MAX_TRUNCATED` | `related-transfer-abuse` | 1 | 0건. raw 7개 selection에도 gold가 없었음 |
+| `GROUNDING / CASE_NOT_OBSERVED` | `related-platform-union-worker`, `statute-trade-union-worker-2` | 2 | 1건 영향, 1건 무영향 |
+
+`related-platform-union-worker`에서는 모델이 `2014두12598, 12604` 복합 사건번호를 선택했고, upstream detail 결과에도 같은 복합 표기가 있었어요. 그러나 ledger에는 `2014두12598`이 exact observed key로 남아 복합 selection이 `CASE_NOT_OBSERVED`로 제거됐고, 최종 strict miss가 됐어요. 따라서 이 건은 evidence-free hallucination으로 확정하기보다 복합 사건번호 표현과 closed-world ledger key의 불일치로 분류해야 해요.
+
+`statute-trade-union-worker-2`에서는 추가 selection `2011구합20239,26770`만 제거됐고 gold `2014두12598`은 유지됐어요. strict hit에는 영향이 없어요.
+
+Luna 7건 전체에서 FORMAT_ONLY 5건은 strict accuracy 손실이 없었고, GROUNDING 2건 중 공식 strict 손실은 1건이에요. 다음 AO policy 후보는 일반적인 intro 완화가 아니라, evidence가 확인된 복합 사건번호를 어떻게 ledger와 final selection에 표현할지에 대한 별도 검토예요.
+
+## 10. Final Review Handoff
+
+현재 checkpoint는 `M8_FINAL_AUDIT_COMPLETE`이며 다음 단계는 `M8_USER_REVIEW_REQUIRED`예요.
+
+- Gemini strict-loss 4건의 first-loss가 기록됨
+- Luna repair 7건의 FORMAT_ONLY/GROUNDING taxonomy와 strict 영향이 기록됨
+- prompt, validator, gateway, ranking, selection policy 변경 없음
+- fresh golden-17 raw artifact와 M7 비교 raw artifact는 private 경로에 보존됨
+- 제품 `main` 통합과 추가 live continuation은 사용자 검토 전 진행하지 않음
