@@ -18,6 +18,13 @@ import {
   prepareCandidates,
 } from "./nlPipeline.js";
 
+const DEFAULT_RUNTIME = Object.freeze({
+  generateAgenticTurn,
+  runtimeName,
+  modelName,
+  reasoningEffort,
+});
+
 const DECISION_DOMAINS = new Set(["precedent", "constitutional", "admin_appeal"]);
 const TOOL_NAMES = new Set(["search_decisions", "search_law", "get_law_text", "get_decision_text"]);
 
@@ -282,13 +289,13 @@ function decisionNumbersFromResult(name, result) {
   return [];
 }
 
-function createAgenticTrace() {
+function createAgenticTrace(runtime = DEFAULT_RUNTIME) {
   return {
     events: [],
     metrics: {
-      runtime: runtimeName,
-      model: modelName,
-      reasoningEffort,
+      runtime: runtime.runtimeName,
+      model: runtime.modelName,
+      reasoningEffort: runtime.reasoningEffort,
       geminiRequests: 0,
       geminiRetryRequests: 0,
       geminiRpmWaitEvents: 0,
@@ -312,12 +319,12 @@ function createAgenticTrace() {
   };
 }
 
-function publicAgentMetrics(metrics, stopReason, fallbackUsed) {
+function publicAgentMetrics(metrics, stopReason, fallbackUsed, runtime = DEFAULT_RUNTIME) {
   if (!metrics) return null;
   return {
-    runtime: metrics.runtime || runtimeName,
-    model: metrics.model || modelName,
-    reasoning_effort: metrics.reasoningEffort || reasoningEffort,
+    runtime: metrics.runtime || runtime.runtimeName,
+    model: metrics.model || runtime.modelName,
+    reasoning_effort: metrics.reasoningEffort || runtime.reasoningEffort,
     gemini_requests: metrics.geminiRequests || 0,
     gemini_retry_requests: metrics.geminiRetryRequests || 0,
     gemini_rpm_wait_events: metrics.geminiRpmWaitEvents || 0,
@@ -370,15 +377,21 @@ function classifyAgentError(error) {
   return "ERROR";
 }
 
-export async function runAgenticSearch(query) {
+export async function runAgenticSearch(query, options = {}) {
+  const runtime = options.runtime || DEFAULT_RUNTIME;
+  const generateAgenticTurnFn = runtime.generateAgenticTurn || generateAgenticTurn;
+  const effectiveAgenticMode = options.agenticMode || config.agenticMode;
+  const effectiveAgenticCallMax = Number.isInteger(options.agenticCallMax)
+    ? options.agenticCallMax
+    : config.agenticCallMax;
   const contents = [{ role: "user", parts: [{ text: query }] }];
   const candidates = new Map();
   const toolCache = new Map();
   const seenSearchCalls = new Set();
   const seenDetailCalls = new Set();
-  const trace = createAgenticTrace();
+  const trace = createAgenticTrace(runtime);
   const startedAt = Date.now();
-  const openHorizon = config.agenticMode === "open";
+  const openHorizon = effectiveAgenticMode === "open";
   let selection = null;
   let questionCalls = 0;
   let stopReason = openHorizon ? "SAFETY_WATCHDOG_STOP" : "QUESTION_CALL_LIMIT";
@@ -390,7 +403,7 @@ export async function runAgenticSearch(query) {
         stopReason = "SAFETY_WATCHDOG_STOP";
         break;
       }
-      if (!openHorizon && questionCalls >= config.agenticCallMax) {
+      if (!openHorizon && questionCalls >= effectiveAgenticCallMax) {
         stopReason = "QUESTION_CALL_LIMIT";
         break;
       }
@@ -414,12 +427,13 @@ export async function runAgenticSearch(query) {
       };
       let turn;
       try {
-        turn = await generateAgenticTurn(
+        turn = await generateAgenticTurnFn(
           contents,
           [...candidates.keys()],
           questionCalls,
           {
             enforceQuestionLimit: !openHorizon,
+            questionLimit: effectiveAgenticCallMax,
             rpdReserve: openHorizon ? config.aoRpdReserve : 0,
             telemetry: turnTelemetry,
           },
@@ -435,7 +449,7 @@ export async function runAgenticSearch(query) {
         throw error;
       }
       questionCalls += turn.callsUsed;
-      if (runtimeName === "gemini") {
+      if (runtime.runtimeName === "gemini") {
         trace.metrics.geminiRequests += turn.callsUsed;
         trace.metrics.geminiRetryRequests += Math.max(0, turn.callsUsed - 1);
         trace.metrics.geminiRpmWaitEvents += turnTelemetry.geminiRpmWaitEvents || 0;
@@ -444,14 +458,14 @@ export async function runAgenticSearch(query) {
         accumulateCodexMetrics(trace.metrics, turnTelemetry);
       }
       const tokenCounts = responseTokenCounts(turn.response);
-      if (runtimeName === "gemini") {
+      if (runtime.runtimeName === "gemini") {
         trace.metrics.geminiInputTokens += tokenCounts.inputTokens;
         trace.metrics.geminiOutputTokens += tokenCounts.outputTokens;
       }
       const response = turn.response;
       const functionCalls = response.functionCalls || [];
       if (functionCalls.length === 0) {
-        selection = parseSelectionResponse(response);
+        selection = (runtime.parseSelectionResponse || parseSelectionResponse)(response);
         stopReason = "MODEL_FINAL";
         break;
       }
@@ -543,7 +557,8 @@ export async function runAgenticSearch(query) {
   return { selection, candidates: [...candidates.values()], limitReached: false, stopReason, callsUsed: questionCalls, trace };
 }
 
-export async function runAgenticPipeline(query) {
+export async function runAgenticPipeline(query, options = {}) {
+  const runtime = options.runtime || DEFAULT_RUNTIME;
   let search;
   let fallbackLabel = "";
   let rawAgentCandidates = [];
@@ -554,7 +569,7 @@ export async function runAgenticPipeline(query) {
   let fallbackCandidateSet = [];
   const fallbackReasons = [];
   try {
-    search = await runAgenticSearch(query);
+    search = await runAgenticSearch(query, options);
     rawAgentCandidates = search.candidates;
     rawAgentSelection = search.selection;
     agentStopReason = search.stopReason;
@@ -610,7 +625,7 @@ export async function runAgenticPipeline(query) {
       fallback_reason: [...new Set(fallbackReasons)],
       raw_agent_candidate_set: rawAgentCandidates.map(serializeCandidate),
       fallback_candidate_set: fallbackCandidateSet.map(serializeCandidate),
-      agent_metrics: publicAgentMetrics(agentTrace?.metrics, agentStopReason, fallbackReasons.length > 0),
+      agent_metrics: publicAgentMetrics(agentTrace?.metrics, agentStopReason, fallbackReasons.length > 0, runtime),
       agent_events: agentTrace?.events || [],
       final_product_output: null,
     };
@@ -634,7 +649,7 @@ export async function runAgenticPipeline(query) {
     fallback_reason: [...new Set(fallbackReasons)],
     raw_agent_candidate_set: rawAgentCandidates.map(serializeCandidate),
     fallback_candidate_set: fallbackCandidateSet.map(serializeCandidate),
-    agent_metrics: publicAgentMetrics(agentTrace?.metrics, agentStopReason, fallbackReasons.length > 0),
+    agent_metrics: publicAgentMetrics(agentTrace?.metrics, agentStopReason, fallbackReasons.length > 0, runtime),
     agent_events: agentTrace?.events || [],
     final_product_output: null,
   };

@@ -32,6 +32,7 @@ export function toResultContract(result = {}, metadata = {}) {
     selection_repaired: result.selection_repaired === undefined ? null : result.selection_repaired === true,
     protocol_diagnostics: Array.isArray(result.protocolDiagnostics) ? [...result.protocolDiagnostics] : [],
     rejected_selected: Array.isArray(result.rejectedSelected) ? [...result.rejectedSelected] : [],
+    execution_pin: metadata.executionPin || result.execution_pin || null,
     telemetry,
     error: text(result.error),
   };

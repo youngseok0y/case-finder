@@ -1,5 +1,6 @@
 import { config } from "../../../config.js";
 import { finalizeSelection } from "../finalSelectionGate.js";
+import { normalizeLegalToolResult } from "../legalToolGateway.js";
 import { createSafetyController } from "../safety.js";
 import { createTelemetry } from "../telemetry.js";
 
@@ -54,12 +55,35 @@ export function createCodexNativeAo({
     async run(query) {
       telemetry.setQuestionScopeId(ledger.scopeId);
       const startedAt = Date.now();
+      const recordDelegatedToolResult = ({ name, arguments: args = {}, result: toolResult } = {}) => {
+        const normalized = toolResult?.items || toolResult?.caseNumber || toolResult?.rawText
+          ? toolResult
+          : normalizeLegalToolResult(name, toolResult || {});
+        if (!normalized || normalized.isError) return;
+        if (name === "search_decisions") {
+          ledger.recordDecisionSearch({ query: args?.query, domain: args?.domain, items: normalized.items || [] });
+        } else if (name === "search_law") {
+          ledger.recordLawSearch({ query: args?.query, items: normalized.items || [] });
+        } else if (name === "get_decision_text") {
+          ledger.recordDecisionDetail({
+            domain: args?.domain,
+            id: args?.id,
+            caseNumber: normalized.caseNumber,
+            detail: normalized,
+            rawText: normalized.rawText,
+            verified: true,
+          });
+        } else if (name === "get_law_text") {
+          ledger.recordLawText({ mst: args?.mst, lawId: args?.lawId, textOpened: Boolean(normalized.rawText) });
+        }
+      };
       const session = await createSession({
         query,
         prompt: buildLunaNativePrompt(query),
         model: config.codexModel,
         reasoningEffort: config.codexReasoningEffort,
         tools: CODEX_NATIVE_ALLOWED_TOOLS.map((name) => ({ name, kind: "legal", restricted: true })),
+        onDelegatedToolResult: recordDelegatedToolResult,
       });
       telemetry.setSessionId(session?.sessionId || session?.session_id || null);
       let closed = false;
@@ -112,6 +136,7 @@ export function createCodexNativeAo({
               };
             }
             if (event.delegated === true) {
+              safety.recordLegalToolCall();
               telemetry.recordToolCall(name, {});
               safety.noteEvidenceCount(ledger.snapshot().cases.length + ledger.snapshot().laws.length);
               continue;

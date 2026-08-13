@@ -19,10 +19,13 @@ export function createSearchAdapterRegistry({ adapters = {} } = {}) {
     ["gemini_a6", createGeminiA6Adapter()],
     ["luna_native", createLunaNativeAdapter()],
   ]);
-  for (const [id, adapter] of Object.entries(adapters)) entries.set(id, adapter);
+  for (const [id, adapter] of Object.entries(adapters)) {
+    if (!SEARCH_ADAPTER_IDS.includes(id)) throw new SearchAdapterUnsupportedError(id);
+    entries.set(id, adapter);
+  }
   return {
     ids() {
-      return [...entries.keys()];
+      return [...SEARCH_ADAPTER_IDS];
     },
     resolve(adapterId = process.env.SEARCH_ADAPTER || "gemini_d") {
       const adapter = entries.get(adapterId);

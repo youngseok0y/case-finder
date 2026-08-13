@@ -333,9 +333,9 @@ primary blind에는 `expectedCaseNumbers`를 넣지 않는다.
 
 ---
 
-# 8. Blind-30 runner 준비
+# 8. Blind-30 runner 및 live continuation 준비
 
-이번 환경에서 runner만 만든다.
+준비 브랜치에는 dummy dry-run과, 새 환경에서 private input이 주어졌을 때만 명시적으로 실행되는 live continuation entrypoint를 둔다.
 
 권장:
 
@@ -346,7 +346,7 @@ test/m9-blind30-unmask.js
 test/m9-blind30-dryrun.test.js
 ```
 
-실제 blind 질문이 없으므로 **dummy fixture로만 dry-run**.
+실제 blind 질문이 없으므로 현재 환경에서는 **dummy fixture로만 dry-run**한다. live 경로는 `--execute`가 없으면 실행되지 않으며, `test/private/m9-blind30/questions.json`의 frozen input을 요구한다.
 
 ---
 
@@ -989,6 +989,43 @@ Source: ignored M8 Luna Golden-17 trace and final artifacts under test/private/m
 ## New-environment start point
 
 In a fresh environment, create and freeze the real 30-question blind input under ignored test/private/m9-blind30/, then run the three adapters for 90 total slots, build the blind packet, conduct blind review, and unmask only after review validation. The current branch is intentionally stopped before those steps.
+
+## 35. Adapter pinning and live continuation (2026-08-13)
+
+The three registry IDs now pin their execution surfaces rather than relying on ambient process variables:
+
+```text
+gemini_d
+  runtime = Gemini
+  pipeline = deterministic D
+  request budget = 2
+
+gemini_a6
+  runtime = Gemini
+  mode = bounded A6
+  question call max = 6
+
+luna_native
+  provider = codex_luna
+  model = gpt-5.6-luna
+  reasoning = medium
+  native search instance = adapter-scoped persistent
+```
+
+`MODEL_RUNTIME`, `AGENTIC_MODE`, and `AGENTIC_CALL_MAX` cannot change these adapter pins. The Gemini A6 question limit is passed through to the rate limiter as a per-call limit, so a smaller ambient environment limit cannot silently reduce the A6 arm.
+
+The new-environment continuation commands are:
+
+```bash
+npm run m9:live
+npm run m9:packet
+```
+
+`m9:live` requires the ignored, frozen `test/private/m9-blind30/questions.json`, executes exactly 90 slots, and writes the private run artifact. `m9:packet` consumes that private run artifact and writes the masked packet plus sealed unmask file. No real question, expected case, review label, or live output was added in this repository.
+
+## 36. Private replay verification boundary (2026-08-13)
+
+The recorded M8 replay artifact is intentionally outside GitHub under `test/private/m8-golden17-live-final-luna/`. In this checkout that artifact is absent, so `npm run m9:replay` cannot be independently rerun from tracked files; it stops with the missing-private-artifact condition. The 2/2 replay result in section 34 remains historical handoff evidence, not a claim newly verified from GitHub alone.
 
 ## Changed files
 

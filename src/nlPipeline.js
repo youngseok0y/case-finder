@@ -418,12 +418,18 @@ export async function finalizeSelection({
 
 export async function runDeterministicPipeline(query, dependencies = {}) {
   const startedAt = Date.now();
+  const pinnedRuntime = dependencies.runtime || {};
+  const effectiveRuntimeName = dependencies.runtimeName || pinnedRuntime.runtimeName || runtimeName;
+  const effectiveModelName = dependencies.modelName || pinnedRuntime.modelName || modelName;
+  const effectiveReasoningEffort = dependencies.reasoningEffort === undefined
+    ? (pinnedRuntime.reasoningEffort === undefined ? reasoningEffort : pinnedRuntime.reasoningEffort)
+    : dependencies.reasoningEffort;
   const traceEnabled = process.env.M6E_D_TRACE === "1";
   const dTrace = traceEnabled ? createDTrace() : null;
   const telemetry = {
-    runtime: runtimeName,
-    model: modelName,
-    reasoningEffort,
+    runtime: effectiveRuntimeName,
+    model: effectiveModelName,
+    reasoningEffort: effectiveReasoningEffort,
     geminiRequests: 0,
     geminiRetryRequests: 0,
     geminiRpmWaitEvents: 0,
@@ -445,12 +451,12 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     elapsedMs: 0,
     dTrace,
   };
-  const generatePlanFn = dependencies.generatePlan || generatePlan;
+  const generatePlanFn = dependencies.generatePlan || pinnedRuntime.generatePlan || generatePlan;
   const collectCandidatesFn = dependencies.collectCandidates || collectCandidates;
   const searchRelatedLawsFn = dependencies.searchRelatedLaws || searchRelatedLaws;
   const lookupQueryLawReferencesFn = dependencies.lookupQueryLawReferences || lookupQueryLawReferences;
   const prepareCandidatesFn = dependencies.prepareCandidates || prepareCandidates;
-  const selectCandidatesFn = dependencies.selectCandidates || selectCandidates;
+  const selectCandidatesFn = dependencies.selectCandidates || pinnedRuntime.selectCandidates || selectCandidates;
   const finalizeSelectionFn = dependencies.finalizeSelection || finalizeSelection;
   let plan;
   let fallbackLabel = "";

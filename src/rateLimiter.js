@@ -99,9 +99,12 @@ export function createGeminiRateLimiter(options = {}) {
         if (usage.callsToday >= dailyLimit) {
           throw new GeminiLimitExceededError(reserve > 0 ? "일일 reserve" : "일일 한도");
         }
+        const effectiveQuestionLimit = Number.isInteger(reserveOptions.questionLimit)
+          ? reserveOptions.questionLimit
+          : questionLimit;
         if (reserveOptions.enforceQuestionLimit !== false
           && Number.isInteger(reserveOptions.questionCalls)
-          && reserveOptions.questionCalls >= questionLimit) {
+          && reserveOptions.questionCalls >= effectiveQuestionLimit) {
           throw new GeminiLimitExceededError("질문당 한도");
         }
         if (recentCalls.length >= rpmLimit) {

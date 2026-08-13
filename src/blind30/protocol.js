@@ -68,7 +68,9 @@ function itemIdentity(item) {
 
 export function buildBlindPacket(runRecords) {
   const deduped = new Map();
+  const questionIds = new Set();
   for (const run of Array.isArray(runRecords) ? runRecords : []) {
+    if (text(run?.question_id)) questionIds.add(text(run.question_id));
     const items = Array.isArray(run?.result?.items) ? run.result.items : [];
     for (const item of items) {
       const caseIdentity = itemIdentity(item);
@@ -89,7 +91,8 @@ export function buildBlindPacket(runRecords) {
   }));
   return {
     version: "m9-blind30-review-packet-v1",
-    question_count: new Set(samples.map((sample) => sample.question_id)).size,
+    question_count: questionIds.size,
+    question_ids: [...questionIds],
     sample_count: samples.length,
     samples,
   };

@@ -217,6 +217,7 @@ export async function generateAgenticTurn(contents, observedCaseNumbers, questio
     },
   }, {
     questionCalls,
+    questionLimit: options.questionLimit,
     enforceQuestionLimit: options.enforceQuestionLimit,
     rpdReserve: options.rpdReserve,
     telemetry: options.telemetry,
