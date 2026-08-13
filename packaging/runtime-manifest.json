@@ -1,0 +1,46 @@
+{
+  "version": "m9r-production-baseline-v1",
+  "installer_entrypoint": "CaseFinderSetup.exe",
+  "runtime": {
+    "node": ">=24.14.0 <25",
+    "server": "src/server.js",
+    "bind": "127.0.0.1",
+    "adapters": ["gemini_d", "luna_native"]
+  },
+  "include": [
+    "src/",
+    "public/",
+    "prompts/plan.txt",
+    "prompts/select.txt",
+    "package.json",
+    "package-lock.json",
+    ".env.example",
+    "start.bat"
+  ],
+  "exclude": [
+    ".git/",
+    ".github/",
+    "docs/",
+    "test/",
+    "test/private/",
+    "logs/",
+    "state/",
+    ".env",
+    "coverage/",
+    "dist/",
+    "release/",
+    "*.exe",
+    "*.zip"
+  ],
+  "runtime_dependencies": [
+    "@google/genai",
+    "@modelcontextprotocol/sdk",
+    "dotenv",
+    "korean-law-mcp"
+  ],
+  "notes": [
+    "The installer may install multiple internal processes; it is not required to be a single-process executable.",
+    "Codex CLI/App Server is provisioned separately for luna_native and never receives repository history or private blind artifacts.",
+    "Optional dependency slimming is deferred to the packaging checkpoint."
+  ]
+}

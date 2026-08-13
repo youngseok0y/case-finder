@@ -1,5 +1,3 @@
-import { config } from "../config.js";
-
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -79,7 +77,7 @@ export function renderResults(result) {
     ? "관련판례 (정확히 일치하는 판례를 찾지 못했습니다)"
     : allRelated ? "관련판례 (질문과 정확히 일치하는 판례는 찾지 못했습니다)" : "관련판례";
   const caseSection = items.length > 0
-    ? `<section><h2>${caseHeading}</h2>${items.map((item, index) => renderCase(item, index < config.detailMax)).join("")}</section>`
+    ? `<section><h2>${caseHeading}</h2>${items.map((item) => renderCase(item, true)).join("")}</section>`
     : `<section><h2>${caseHeading}</h2><p class="empty">법령센터에서 해당 사건번호를 찾지 못했습니다. 사건번호를 확인해 주세요.</p></section>`;
   const ignored = result.ignoredCaseCount > 0
     ? `<p class="notice">사건번호는 최대 5개까지만 조회했습니다. 초과한 ${escapeHtml(result.ignoredCaseCount)}개는 무시했습니다.</p>`

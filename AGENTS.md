@@ -9,5 +9,9 @@
 - A5: 결과가 없으면 없다고 표시하고 지어내지 않습니다.
 - A6: 고정 프롬프트와 JSON 스키마를 사용하며 생성 파라미터를 임의 설정하지 않습니다.
 - A7: Gemini 실패 시 법제처 검색 결과와 결정론 랭킹으로 폴백합니다.
+- Product v2: 제품 adapter는 `gemini_d`와 `luna_native`만 사용합니다. `gemini_a6`와 Gemini AO-v2는 legacy 연구 경로입니다.
+- Luna: restricted legal MCP, EvidenceLedger, FinalSelectionGate, verified-only output을 반드시 유지합니다. Luna 실패를 Gemini로 silent fallback하지 않습니다.
+- Adapter pinning: `gemini_d`는 Gemini + D, `luna_native`는 Codex/Luna + Native AO-v2 + `gpt-5.6-luna` + `medium`으로 고정합니다.
+- No leakage: private reasoning, system prompt, raw tool planning, 인증 토큰을 UI·로그·admin에 남기지 않습니다.
 
-작업 순서는 명세의 M0부터 M6까지 따릅니다. 범위를 넓히거나 정확성 계약을 바꾸기 전에는 주인님의 승인을 받습니다.
+작업 순서는 명세의 M0부터 M10까지 따릅니다. M9 이후 검색 prompt·policy·tool·reasoning을 임의로 바꾸지 않습니다. 범위를 넓히거나 정확성 계약을 바꾸기 전에는 주인님의 승인을 받습니다.

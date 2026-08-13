@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { config } from "../config.js";
-import { generatePlan, modelName, reasoningEffort, runtimeName, selectCandidates } from "./modelRuntime.js";
+import { generatePlan, runtimeName, selectCandidates } from "./geminiRuntime.js";
 import {
   lookupDecisionCandidate,
   enrichLawReferences,
@@ -15,6 +15,9 @@ import {
 } from "./directLookup.js";
 import { caseNumberIncludes, caseNumberKey, normalizeCaseNumber } from "./router.js";
 import { logValidation } from "./log.js";
+
+const modelName = config.geminiModel;
+const reasoningEffort = null;
 
 async function mapWithConcurrency(values, limit, callback) {
   const results = new Array(values.length);
@@ -34,14 +37,13 @@ async function mapWithConcurrency(values, limit, callback) {
   await Promise.all(Array.from({ length: Math.min(limit, values.length) }, () => worker()));
   return results;
 }
-
 function courtWeight(court) {
   const name = String(court || "");
   if (name.includes("대법원") || name.includes("헌법재판소") || name.includes("헌재")) return 5;
   if (name.includes("고등법원") || name.includes("고법")) return 3;
   return 1;
 }
-
+// Product Gemini D pipeline ends here.
 function dateNumber(value) {
   const digits = String(value || "").replace(/\D/g, "");
   return /^\d{8}$/.test(digits) ? Number(digits) : 0;
@@ -206,7 +208,6 @@ function numericSummary(values) {
     max: sorted[sorted.length - 1],
   };
 }
-
 function candidateKeywordCount(candidate) {
   return candidate?.matchedKeywords instanceof Set
     ? candidate.matchedKeywords.size
@@ -546,12 +547,4 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     },
     ...(dTrace ? { d_trace: dTrace } : {}),
   };
-}
-
-export async function runNaturalPipeline(query) {
-  if (config.pipelineMode === "agentic") {
-    const { runAgenticPipeline } = await import("./agenticPipeline.js");
-    return runAgenticPipeline(query);
-  }
-  return runDeterministicPipeline(query);
 }

@@ -9,24 +9,10 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check config.js && node --check src/log.js && node --check src/mcpClient.js && node --check src/router.js && node --check src/directLookup.js && node --check src/rateLimiter.js && node --check src/gemini.js && node --check src/geminiRuntime.js && node --check src/codexCliRuntime.js && node --check src/codexNativeSession.js && node --check src/modelRuntime.js && node --check src/nlPipeline.js && node --check src/agenticPipeline.js && node --check src/validator.js && node --check src/renderer.js && node --check src/server.js && node --check src/aoV2/evidenceLedger.js && node --check src/aoV2/finalSelectionGate.js && node --check src/aoV2/legalToolGateway.js && node --check src/aoV2/safety.js && node --check src/aoV2/telemetry.js && node --check src/aoV2/index.js && node --check src/aoV2/providers/geminiNativeAo.js && node --check src/aoV2/providers/codexNativeAo.js && node --check src/aoV2/restrictedMcp/server.js && node --check src/searchAdapters/resultContract.js && node --check src/searchAdapters/geminiDAdapter.js && node --check src/searchAdapters/geminiA6Adapter.js && node --check src/searchAdapters/lunaNativeAdapter.js && node --check src/searchAdapters/registry.js && node --check src/searchAdapters/index.js && node --check src/blind30/protocol.js && node --check test/m8-known10-live.js && node --check test/m8-live-mcp-proxy.js && node --check test/m9-blind30-run.js && node --check test/m9-blind30-build-packet.js && node --check test/m9-blind30-unmask.js && node --check test/m9-blind30-luna-rerun.js && node --check test/m9-blind30-luna-packet.js && node --check test/m9-blind30-finalize.js && node --check test/m9-compound-replay.js && node --check test/run.js && node --check test/m6c-screen.js && node --check test/m6d-reanalyze.js && node --check test/m6d-rpm-pacer.js && node --check test/m6d-private-holdout.js && node --check test/m6d-review.js && node --check test/m6e-d-loss-diagnosis.js && node --check test/m6e-d-trace-parity.js && node --check test/m6e-d-trace-revalidation.js && node --check test/m7-codex-preflight.js && node --check test/m7-four-arm-golden.js",
-    "verify": "node test/run.js",
-    "m6d:reanalyze": "node test/m6d-reanalyze.js",
-    "m6d:test:pacer": "node test/m6d-rpm-pacer.js",
-    "m6d:holdout": "node test/m6d-private-holdout.js --execute",
-    "m6d:review": "node test/m6d-review.js",
-    "m7:preflight": "node test/m7-codex-preflight.js",
-    "m7:golden": "node test/m7-four-arm-golden.js",
-    "m8:test": "node --test test/legalToolGateway.test.js test/evidenceLedger.test.js test/finalSelectionGate.test.js test/geminiNativeAoAdapter.test.js test/codexNativeAoAdapter.test.js test/aoV2Isolation.test.js",
-    "m8:known10": "node test/m8-known10-live.js",
-    "m9:test": "node --test test/searchAdapters.test.js test/m9-blind30-dryrun.test.js test/m9-compoundReplay.test.js test/evidenceLedger.test.js test/finalSelectionGate.test.js",
-    "m9:replay": "node test/m9-compound-replay.js --recorded",
-    "m9:live": "node test/m9-blind30-run.js --execute",
-    "m9:packet": "node test/m9-blind30-build-packet.js --execute",
-    "m9:unmask": "node test/m9-blind30-unmask.js --execute",
-    "m9:luna:rerun": "node test/m9-blind30-luna-rerun.js --execute",
-    "m9:luna:packet": "node test/m9-blind30-luna-packet.js --execute",
-    "m9:finalize": "node test/m9-blind30-finalize.js"
+    "check": "node --check config.js && node --check src/log.js && node --check src/mcpClient.js && node --check src/router.js && node --check src/directLookup.js && node --check src/rateLimiter.js && node --check src/gemini.js && node --check src/geminiRuntime.js && node --check src/codexNativeSession.js && node --check src/nlPipeline.js && node --check src/validator.js && node --check src/renderer.js && node --check src/server.js && node --check src/aoV2/evidenceLedger.js && node --check src/aoV2/finalSelectionGate.js && node --check src/aoV2/legalToolGateway.js && node --check src/aoV2/safety.js && node --check src/aoV2/telemetry.js && node --check src/aoV2/index.js && node --check src/aoV2/providers/codexNativeAo.js && node --check src/aoV2/restrictedMcp/server.js && node --check src/aoV2/restrictedMcp/stdioServer.js && node --check src/searchAdapters/resultContract.js && node --check src/searchAdapters/geminiDAdapter.js && node --check src/searchAdapters/lunaNativeAdapter.js && node --check src/searchAdapters/registry.js && node --check src/searchAdapters/index.js && node --check test/searchAdapters.test.js && node --check test/legalToolGateway.test.js && node --check test/evidenceLedger.test.js && node --check test/finalSelectionGate.test.js && node --check test/codexNativeAoAdapter.test.js && node --check test/aoV2Isolation.test.js && node --check test/compoundIdentity.test.js",
+    "verify": "npm run check && npm run product:test",
+    "test": "npm run product:test",
+    "product:test": "node --test test/searchAdapters.test.js test/legalToolGateway.test.js test/evidenceLedger.test.js test/finalSelectionGate.test.js test/codexNativeAoAdapter.test.js test/aoV2Isolation.test.js test/compoundIdentity.test.js"
   },
   "dependencies": {
     "@google/genai": "2.13.0",

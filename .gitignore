@@ -6,3 +6,11 @@ state/*
 logs/*
 !logs/.gitkeep
 test/private/
+dist/
+build/
+release/
+coverage/
+*.exe
+*.msi
+*.zip
+*.nupkg

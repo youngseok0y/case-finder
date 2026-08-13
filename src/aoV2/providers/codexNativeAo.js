@@ -92,7 +92,7 @@ export function createCodexNativeAo({
           safety.assertCanContinue();
           const event = await session.next();
           if (!event) throw new Error("CODEX_NATIVE_SESSION_ENDED_WITHOUT_FINAL");
-          if (event.type === "session_timeout") throw new Error("M8_CODEX_SESSION_TIMEOUT");
+          if (event.type === "session_timeout") throw new Error("CODEX_NATIVE_SESSION_TIMEOUT");
           if (FORBIDDEN_EVENT_TYPES.has(event.type)) {
             telemetry.recordToolCall(event.type, { rejected: true, errorCode: "FORBIDDEN_TOOL" });
             telemetry.markProtocolInvalid();

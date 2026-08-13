@@ -3,7 +3,6 @@ import { createEvidenceLedger } from "./evidenceLedger.js";
 import { createLegalToolGateway } from "./legalToolGateway.js";
 import { createSafetyController } from "./safety.js";
 import { createTelemetry } from "./telemetry.js";
-import { createGeminiNativeAo } from "./providers/geminiNativeAo.js";
 import { createCodexNativeAo } from "./providers/codexNativeAo.js";
 
 export { createEvidenceLedger } from "./evidenceLedger.js";
@@ -11,11 +10,10 @@ export { createLegalToolGateway, LEGAL_TOOL_NAMES } from "./legalToolGateway.js"
 export { createFinalSelectionGate, finalizeSelection } from "./finalSelectionGate.js";
 export { createSafetyController } from "./safety.js";
 export { createTelemetry } from "./telemetry.js";
-export { createGeminiNativeAo } from "./providers/geminiNativeAo.js";
 export { createCodexNativeAo } from "./providers/codexNativeAo.js";
 
 export function createAgenticSearchV2({
-  provider = config.modelRuntime === "codex_cli" ? "codex_luna" : "gemini",
+  provider = "codex_luna",
   gatewayOptions = {},
   adapterOptions = {},
 } = {}) {
@@ -35,9 +33,8 @@ export function createAgenticSearchV2({
       });
       const safety = createSafetyController();
       const gateway = createLegalToolGateway({ ...gatewayOptions, ledger, telemetry, safety });
-      const adapter = provider === "codex_luna"
-        ? createCodexNativeAo({ ...adapterOptions, gateway, ledger, telemetry, safety })
-        : createGeminiNativeAo({ ...adapterOptions, gateway, ledger, telemetry, safety });
+      if (provider !== "codex_luna") throw new Error(`AO_V2_PROVIDER_RETIRED:${provider}`);
+      const adapter = createCodexNativeAo({ ...adapterOptions, gateway, ledger, telemetry, safety });
       lastRun = { ledger, telemetry, safety, gateway };
       return adapter.run(query);
     },

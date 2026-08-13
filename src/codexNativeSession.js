@@ -78,7 +78,7 @@ function parseArguments(value) {
 }
 
 function resolveCodexCommand() {
-  const configured = process.env.M9_CODEX_CLI_PATH || process.env.CODEX_CLI_PATH || config.codexCliPath;
+  const configured = process.env.CODEX_CLI_PATH || config.codexCliPath;
   if (process.platform === "win32" && configured === "codex") {
     const appData = process.env.APPDATA || "";
     const cliScript = appData
@@ -110,8 +110,8 @@ function createSessionDirectory(baseDir, index) {
 }
 
 export function createCodexCliSessionFactory({
-  baseDir = process.env.M9_LUNA_SESSION_DIR || path.join(ROOT_DIR, "test", "private", "m9-blind30", "luna-sessions"),
-  proxyPath = path.join(ROOT_DIR, "test", "m8-live-mcp-proxy.js"),
+  baseDir = process.env.LUNA_SESSION_DIR || config.codexWorkdir,
+  proxyPath = process.env.CODEX_LEGAL_MCP_BRIDGE || path.join(ROOT_DIR, "src", "aoV2", "restrictedMcp", "stdioServer.js"),
 } = {}) {
   let sessionIndex = 0;
   return async ({ prompt, model = config.codexModel, reasoningEffort = config.codexReasoningEffort, onDelegatedToolResult } = {}) => {
@@ -139,7 +139,7 @@ export function createCodexCliSessionFactory({
     const codexCommand = resolveCodexCommand();
     const child = spawn(codexCommand.command, [...codexCommand.prefixArgs, ...args], {
       cwd: workdir,
-      env: { ...process.env, M8_PROXY_LOG_PATH: proxyLogPath },
+      env: { ...process.env, LEGAL_MCP_LOG_PATH: proxyLogPath },
       windowsHide: true,
       shell: codexCommand.shell,
       stdio: ["pipe", "pipe", "pipe"],
@@ -161,7 +161,7 @@ export function createCodexCliSessionFactory({
     let resolveClose;
     const closePromise = new Promise((resolve) => { resolveClose = resolve; });
     const sessionTimerMs = Math.max(30_000, Number.parseInt(
-      process.env.M9_LUNA_SESSION_TIMEOUT_MS || String(config.aoWallClockMaxMs),
+      process.env.LUNA_SESSION_TIMEOUT_MS || String(config.codexTimeoutMs),
       10,
     ));
 
@@ -244,7 +244,7 @@ export function createCodexCliSessionFactory({
       clearTimeout(sessionTimer);
       ended = true;
       closeResult = { code, signal };
-      for (const waiter of waiters.splice(0)) waiter(timedOut ? Promise.reject(new Error("M8_CODEX_SESSION_TIMEOUT")) : null);
+        for (const waiter of waiters.splice(0)) waiter(timedOut ? Promise.reject(new Error("CODEX_NATIVE_SESSION_TIMEOUT")) : null);
       resolveClose();
     });
     child.stdin.end(prompt);
@@ -261,17 +261,17 @@ export function createCodexCliSessionFactory({
         if (!ended) return new Promise((resolve) => waiters.push(resolve));
         if (finalReturned) return null;
         finalReturned = true;
-        if (timedOut) throw new Error("M8_CODEX_SESSION_TIMEOUT");
+        if (timedOut) throw new Error("CODEX_NATIVE_SESSION_TIMEOUT");
         const finalText = await fs.readFile(finalPath, "utf8").catch(() => "");
         if (!finalText) {
           const processDiagnostic = closeResult?.code !== 0
-            ? `M8_CODEX_PROCESS_FAILED:${closeResult?.code}:${safeDiagnostic(stderr)}`
-            : `M8_CODEX_FINAL_MISSING:${safeDiagnostic(stderr)}`;
+            ? `CODEX_NATIVE_PROCESS_FAILED:${closeResult?.code}:${safeDiagnostic(stderr)}`
+            : `CODEX_NATIVE_FINAL_MISSING:${safeDiagnostic(stderr)}`;
           throw new Error(processDiagnostic);
         }
         let selection;
-        try { selection = JSON.parse(finalText); } catch (error) { throw new Error(`M8_CODEX_FINAL_INVALID:${error.message}`); }
-        if (closeResult?.code !== 0) throw new Error(`M8_CODEX_PROCESS_FAILED:${closeResult?.code}:${safeDiagnostic(stderr)}`);
+        try { selection = JSON.parse(finalText); } catch (error) { throw new Error(`CODEX_NATIVE_FINAL_INVALID:${error.message}`); }
+        if (closeResult?.code !== 0) throw new Error(`CODEX_NATIVE_PROCESS_FAILED:${closeResult?.code}:${safeDiagnostic(stderr)}`);
         return { type: "final", selection, usage: lastUsage, elapsedMs: 0, session_id: [...sessionIds][0] || null };
       },
       async close() {

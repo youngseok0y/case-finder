@@ -1,40 +1,50 @@
-# Fable 판례 검색기
+# Fable Case Finder
 
-법제처 국가법령정보 Open API에 존재하는 원문만 표시하는 로컬 판례 검색기입니다.
+법제처 국가법령정보 Open API에 실제로 존재하는 판례·법령 원문만 표시하는 로컬 판례 검색기입니다. 법률 자문이 아니라 검색·정리 도구입니다.
 
-## 실행
+## 제품 검색 구성
 
-1. Node.js `>=24.14.0 <25` 범위의 버전을 설치합니다.
-2. `.env.example`을 `.env`로 복사하고 `LAW_OC`를 입력합니다.
-3. 최초 1회 `npm ci`를 실행합니다.
-4. `start.bat`을 실행하거나 `npm start`를 실행합니다.
-5. 브라우저에서 `http://localhost:3300`을 엽니다.
+사용자에게 제공하는 검색 adapter는 두 가지입니다.
 
-현재 구현은 M6C 평가 단계입니다. 사건번호 직접 조회와 두 가지 자연어 검색 모드(D: 결정론, A6: 질문당 6회 제한 에이전틱)를 제공하며, 기본 `PIPELINE_MODE=deterministic`은 고정 JSON 스키마의 검색계획·후보 내 선별과 결정론 랭킹을 사용합니다. `PIPELINE_MODE=agentic`은 허용된 4개 MCP 도구의 함수 호출 루프를 사용합니다. `AGENTIC_MODE=open`은 AO(open-horizon) 비교 평가 전용 설정이며 제품 기본 모드로 확정되지 않았습니다. 에이전틱 도구 결과는 검색 목록·판례 요지·메타데이터를 구조화해 전달하고, 관측된 사건번호만 선택하는 닫힌 검증을 적용합니다. 판시사항·판결요지·관련법규는 법령센터 원문만 표시하며, Gemini 실패 또는 내부 호출 한도 초과 시 결정론 결과로 폴백합니다. Gemini 사용량은 `state/usage.json`에 기록되며 내부 한도는 분당 13회·태평양 시간 기준 하루 450회입니다.
+- `gemini_d` — Gemini 빠른 검색: 결정론적 검색계획, 법제처 후보 검색, 후보 내 선별
+- `luna_native` — Luna 고정밀 검색: GPT-5.6 Luna medium, Native AO-v2, restricted legal MCP, EvidenceLedger, FinalSelectionGate
 
-`start.bat` 실행 후 cmd 창은 런처로 유지됩니다. 메뉴에서 `S` 서버 시작, `R` 재시작, `X` 종료, `Q` 런처 종료를 선택할 수 있습니다. 서버 출력은 런처 cmd 창에 표시되며 오류 로그는 `logs/error.log`에 기록됩니다.
+Gemini A6와 Gemini AO-v2는 연구 history에 보존하지 않고 제품 runtime에는 포함하지 않습니다. Luna 실행 실패 시 Gemini로 자동 전환하지 않습니다.
 
-## 검증 세트
+## 설치·실행
 
-M5/M6C 회귀 세트는 `test/golden.json`에 있습니다. 서버를 실행한 뒤 기본 검증은 Gemini를 호출하지 않는 직접조회·무존재 항목만 실행합니다.
+1. Node.js `>=24.14.0 <25`를 설치합니다.
+2. `.env.example`을 `.env`로 복사합니다.
+3. `LAW_OC`에 법제처 Open API 인증키를 입력합니다.
+4. Gemini를 사용할 경우 `GEMINI_API_KEY`를 입력합니다.
+5. `SEARCH_ADAPTER`를 `gemini_d` 또는 `luna_native`로 선택합니다.
+6. 최초 1회 `npm ci`를 실행한 뒤 `start.bat` 또는 `npm start`를 실행합니다.
+7. 브라우저에서 `http://127.0.0.1:3300`을 엽니다.
+
+Luna를 선택하면 `CODEX_CLI_PATH`와 Codex 로그인 상태가 필요합니다. Codex native session은 질문별 작업 디렉터리를 `state/codex-runtime` 아래에 만들며, `.env`와 인증 토큰을 결과나 로그에 기록하지 않습니다.
+
+## 정확성·안전 원칙
+
+- 사건번호, 법원, 선고일, 판시사항, 판결요지·결정요지, 법령 조문과 공식 링크는 provider 원문·메타데이터에서만 가져옵니다.
+- 최종 판례는 provider 검색 관측, 상세 조회 성공, 상세 identity 검증을 모두 통과해야 표시됩니다.
+- Luna는 restricted legal MCP만 사용하며 EvidenceLedger와 FinalSelectionGate를 우회하지 않습니다.
+- 검증되지 않은 사건번호나 찾지 못한 판례를 채워 넣지 않습니다.
+- 직접 사건번호 조회는 LLM을 호출하지 않습니다.
+
+## 개발 검증
 
 ```text
-npm run verify -- --base-url=http://127.0.0.1:3300
+npm run check
+npm run product:test
+npm run verify
 ```
 
-자연어 항목과 반복 일관성까지 실행할 때는 모드별 서버를 별도로 띄운 뒤 다음처럼 실행합니다. 자연어 검증은 Gemini quota를 사용합니다.
+검증 세트는 Luna safety, EvidenceLedger, FinalSelectionGate, restricted legal tool surface, compound case identity, adapter pinning을 포함합니다. 실제 법제처·모델 호출이 필요한 운영 검증은 별도 인증키와 실행 환경에서 수행합니다.
 
-```text
-npm run verify -- --base-url=http://127.0.0.1:3310 --mode=deterministic --include-natural --repeat=3
-npm run verify -- --base-url=http://127.0.0.1:3311 --mode=agentic --include-natural --repeat=3
-```
+## 운영 파일
 
-M6C의 현재 비교 결과와 아직 확정되지 않은 제품 모드, 후속 작업은 [`docs/CASE_FINDER_FINAL_REPORT_M6C.md`](./docs/CASE_FINDER_FINAL_REPORT_M6C.md)와 [`docs/CASE_FINDER_NEXT_TASKS_M6C.md`](./docs/CASE_FINDER_NEXT_TASKS_M6C.md)를 참고합니다.
+- `state/`: quota·Codex native session 등 runtime writable state
+- `logs/`: 오류와 validator 기록
+- `.env`: 로컬 전용 설정이며 커밋하지 않습니다.
 
-M6D Phase A 기준선 재집계 결과는 [`docs/CASE_FINDER_M6D_BASELINE_REANALYSIS.md`](./docs/CASE_FINDER_M6D_BASELINE_REANALYSIS.md)에 있으며, Phase B RPM pacing 결과는 [`docs/CASE_FINDER_M6D_RPM_PACER.md`](./docs/CASE_FINDER_M6D_RPM_PACER.md)에 있습니다. RPM full은 대기하고 RPD/RPD reserve는 hard stop으로 유지합니다. private holdout 질문 본문은 저장소에 기록하지 않으며, 사용자 제공 전에는 블라인드 실행을 시작하지 않습니다.
-
-M6D private holdout 30회 실행·외부 reviewer 판정·최종 arm 비교는 [`docs/CASE_FINDER_FINAL_REPORT_M6D.md`](./docs/CASE_FINDER_FINAL_REPORT_M6D.md)에 있습니다. terminal marker는 `M6D_D_RETAINED`이며, private 원문·packet·review 점수는 저장소에 포함하지 않습니다.
-
-## 원칙
-
-상세 설계와 정확성 계약은 [case-finder-spec.md](./case-finder-spec.md)를 유일한 기준으로 삼습니다. `.env`, `state/`, `logs/`의 운영 데이터와 API 키는 커밋하지 않습니다.
+상세 설계와 정확성 계약은 [case-finder-spec.md](./case-finder-spec.md)를 canonical specification으로 사용합니다. M9 결과와 제품 구성 결정은 [M9 최종 보고서](./docs/CASE_FINDER_FINAL_REPORT_M9_BLIND30.md)에 기록되어 있습니다.

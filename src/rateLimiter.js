@@ -48,7 +48,7 @@ export function createGeminiRateLimiter(options = {}) {
   const statePath = options.usageFilePath || usagePath;
   const rpmLimit = Number.isInteger(options.rpmLimit) ? options.rpmLimit : config.geminiRpmLimit;
   const rpdLimit = Number.isInteger(options.rpdLimit) ? options.rpdLimit : config.geminiRpdLimit;
-  const questionLimit = Number.isInteger(options.questionLimit) ? options.questionLimit : config.agenticCallMax;
+  const questionLimit = Number.isInteger(options.questionLimit) ? options.questionLimit : 2;
   const rpmWindowMs = Number.isInteger(options.rpmWindowMs) ? options.rpmWindowMs : RPM_WINDOW_MS;
   const rpmWaitMarginMs = Number.isInteger(options.rpmWaitMarginMs)
     ? options.rpmWaitMarginMs

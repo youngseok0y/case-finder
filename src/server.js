@@ -4,10 +4,10 @@ import path from "node:path";
 import { config, EXPECTED_NODE_VERSION, ROOT_DIR } from "../config.js";
 import { closeMcp, getMcpStatus, startMcp } from "./mcpClient.js";
 import { lookupDirect } from "./directLookup.js";
-import { logAgenticExperiment, logError, logInfo } from "./log.js";
-import { runNaturalPipeline } from "./nlPipeline.js";
+import { logError, logInfo } from "./log.js";
 import { renderResults } from "./renderer.js";
 import { routeQuery } from "./router.js";
+import { defaultSearchAdapterRegistry } from "./searchAdapters/registry.js";
 import { validateDirectResult, validateNaturalResult } from "./validator.js";
 
 const indexPath = path.join(ROOT_DIR, "public", "index.html");
@@ -20,26 +20,6 @@ function sendJson(response, statusCode, payload) {
     "content-length": Buffer.byteLength(body),
   });
   response.end(body);
-}
-
-function attachAgenticFinalOutput(result) {
-  if (!Object.prototype.hasOwnProperty.call(result, "raw_agent_candidates")) return result;
-  return {
-    ...result,
-    final_product_output: {
-      route: result.route,
-      query: result.query,
-      selected: result.selected || [],
-      items: (result.items || []).map((item) => ({
-        providerId: item.providerId || "",
-        caseNumber: item.caseNumber,
-        status: item.status,
-        match: item.match,
-        link: item.link,
-      })),
-      validationFailures: result.validationFailures || [],
-    },
-  };
 }
 
 async function readBody(request) {
@@ -86,19 +66,19 @@ async function handle(request, response) {
       const validated = await validateDirectResult(lookedUp);
       sendJson(response, 200, {
         ok: true,
-        stage: config.pipelineMode === "agentic" ? "M4" : "M3",
+        stage: "DIRECT",
         route: "direct",
         html: renderResults(validated),
         result: validated,
       });
       return;
     }
-    const natural = await runNaturalPipeline(query);
-    const validated = attachAgenticFinalOutput(await validateNaturalResult(natural));
-    if (config.pipelineMode === "agentic") await logAgenticExperiment(query, validated);
+    const adapter = defaultSearchAdapterRegistry.resolve(config.searchAdapter);
+    const natural = await adapter.runNaturalQuery(query);
+    const validated = await validateNaturalResult(natural);
     sendJson(response, 200, {
       ok: true,
-      stage: config.pipelineMode === "agentic" ? "M4" : "M3",
+      stage: config.searchAdapter === "luna_native" ? "LUNA_NATIVE" : "GEMINI_D",
       route: "natural",
       query,
       html: renderResults(validated),

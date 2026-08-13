@@ -5,7 +5,6 @@ import { ROOT_DIR } from "../config.js";
 const logsDir = path.join(ROOT_DIR, "logs");
 const errorLog = path.join(logsDir, "error.log");
 const validationLog = path.join(logsDir, "validation.log");
-const agenticExperimentLog = path.join(logsDir, "agentic-experiment.log");
 
 async function append(filePath, message) {
   await fs.mkdir(logsDir, { recursive: true });
@@ -37,31 +36,5 @@ export async function logValidation(query, caseNumber, reason) {
     await append(validationLog, message);
   } catch (writeError) {
     console.error(`[case-finder] validation log write failed: ${writeError.message}`);
-  }
-}
-
-export async function logAgenticExperiment(query, result) {
-  const safeQuery = String(query || "")
-    .replace(/(?:LAW_OC|OC)\s*[=:]\s*[^\s&]+/gi, "OC=[REDACTED]")
-    .replace(/\s+/g, " ")
-    .slice(0, 500);
-  const record = {
-    query: safeQuery,
-    raw_agent_candidates: result.raw_agent_candidates || [],
-    raw_agent_candidate_set: result.raw_agent_candidate_set || result.raw_agent_candidates || [],
-    raw_agent_selection: result.raw_agent_selection || null,
-    agent_stop_reason: result.agent_stop_reason || "unknown",
-    agent_error_reason: result.agent_error_reason || null,
-    fallback_used: Boolean(result.fallback_used),
-    fallback_reason: result.fallback_reason || [],
-    fallback_candidate_set: result.fallback_candidate_set || [],
-    agent_metrics: result.agent_metrics || null,
-    agent_events: result.agent_events || [],
-    final_product_output: result.final_product_output || null,
-  };
-  try {
-    await append(agenticExperimentLog, JSON.stringify(record));
-  } catch (writeError) {
-    console.error(`[case-finder] agentic experiment log write failed: ${writeError.message}`);
   }
 }
