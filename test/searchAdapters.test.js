@@ -96,6 +96,22 @@ test("canonical result contract preserves candidate evidence through validation"
   assert.equal(validated.contractVersion, RESULT_CONTRACT_VERSION);
 });
 
+test("result contract defensively copies provider arrays", () => {
+  const candidateCaseNumbers = ["2020나2027066"];
+  const lawReferences = [{ lawName: "민법", article: "제750조" }];
+  const contract = toResultContract({
+    selected: [],
+    items: [],
+    candidateCaseNumbers,
+    lawReferences,
+  }, { adapterId: "gemini_d", provider: "gemini", architecture: "D" });
+
+  candidateCaseNumbers.push("2021다1234");
+  lawReferences.push({ lawName: "상법", article: "제1조" });
+  assert.deepEqual(contract.candidateCaseNumbers, ["2020나2027066"]);
+  assert.deepEqual(contract.lawReferences, [{ lawName: "민법", article: "제750조" }]);
+});
+
 test("natural result contract still rejects a selected case outside the candidate evidence", async () => {
   const validated = await validateNaturalResult(toResultContract({
     adapterId: "gemini_d",

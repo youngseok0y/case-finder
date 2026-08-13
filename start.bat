@@ -10,7 +10,7 @@ if exist ".env" (
 for /f "tokens=1" %%V in ('node --version') do set "NODE_VERSION=%%V"
 powershell.exe -NoProfile -Command "$v = [version]'!NODE_VERSION:~1!'; if ($v -ge [version]'24.14.0' -and $v -lt [version]'25.0.0') { exit 0 } else { exit 1 }"
 if errorlevel 1 (
-  echo Node.js >=24.14.0 and ^<25 is required.
+  echo Node.js ^>=24.14.0 and ^<25 is required.
   node --version
   pause
   exit /b 1
@@ -57,13 +57,21 @@ set "PORT_PID="
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr /r /c:":%APP_PORT% .*LISTENING"') do set "PORT_PID=%%P"
 exit /b 0
 
+:getPortProcessInfo
+set "PORT_IMAGE="
+for /f "tokens=1 delims=," %%I in ('tasklist /FI "PID eq !PORT_PID!" /FO CSV /NH 2^>nul') do if not defined PORT_IMAGE set "PORT_IMAGE=%%~I"
+if not defined PORT_IMAGE set "PORT_IMAGE=unknown image"
+exit /b 0
+
 :startServer
 call :findPortPid
 if defined PORT_PID (
   call :checkCaseFinderHealth
   if errorlevel 1 (
-    echo Port %APP_PORT% is already used by an unknown process (PID !PORT_PID!).
-    echo Refusing to terminate a foreign process.
+    call :getPortProcessInfo
+    echo Port %APP_PORT% is used by PID !PORT_PID! ^(!PORT_IMAGE!^).
+    echo Case Finder /health did not respond. The process may be stale or hung.
+    echo Refusing to terminate an unconfirmed process. Stop PID !PORT_PID! manually or change PORT.
     exit /b 1
   )
   echo Existing Case Finder process !PORT_PID! is using port %APP_PORT%.

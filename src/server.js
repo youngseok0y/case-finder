@@ -10,6 +10,7 @@ import { routeQuery } from "./router.js";
 import { defaultSearchAdapterRegistry } from "./searchAdapters/registry.js";
 import { toResultContract } from "./searchAdapters/resultContract.js";
 import { validateDirectResult, validateNaturalResult } from "./validator.js";
+import { PRODUCT_SERVICE } from "./productMessages.js";
 
 const indexPath = path.join(ROOT_DIR, "public", "index.html");
 const maxBodyBytes = 10_000;
@@ -68,6 +69,7 @@ async function handle(request, response) {
       const validated = await validateDirectResult(lookedUp);
       sendJson(response, 200, {
         ok: true,
+        service: PRODUCT_SERVICE,
         stage: "DIRECT",
         route: "direct",
         html: renderResults(validated),
@@ -81,7 +83,7 @@ async function handle(request, response) {
     const publicResult = toResultContract(validated);
     sendJson(response, 200, {
       ok: true,
-      service: "case-finder",
+      service: PRODUCT_SERVICE,
       stage: config.searchAdapter === "luna_native" ? "LUNA_NATIVE" : "GEMINI_D",
       route: "natural",
       query,
