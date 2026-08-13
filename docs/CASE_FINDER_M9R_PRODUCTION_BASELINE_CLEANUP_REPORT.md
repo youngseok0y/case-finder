@@ -9,11 +9,12 @@ M9 Blind-30에서 확정된 검색 구성을 제품용 HEAD에 남기고, 연구
 ```text
 M9_FINAL_SHA = 946ccb1f4ce8edec95d8696b8460c7b9a70a495c
 cleanup branch = m9r-production-baseline-cleanup
-M9R_CLEANUP_SHA = 428cee6c
+M9R_CLEANUP_SHA = 973bdd463a27adfc7a7b68a9043c05db71ae1b5d
 main before promotion = 7671a3d9aab9a358cf60f4746b8e957b8ee9eac4
+main after promotion = 973bdd463a27adfc7a7b68a9043c05db71ae1b5d
 ```
 
-M9 final commit은 로컬에 생성됐다. 원격 push는 `youngseok0y` GitHub token invalid 상태로 보류 중이다. 따라서 원격 tag push, main promotion, remote branch deletion은 수행하지 않았다.
+M9 final commit과 M9R cleanup branch를 원격에 push했다. archive tag 7개를 원격에 게시하고 SHA를 검증한 뒤, M9R baseline을 `main`에 fast-forward로 승격했다. archive tag로 보존된 연구 branch 7개도 삭제했으며, `main`과 `m9r-production-baseline-cleanup`은 유지한다.
 
 ## Product runtime retained
 
@@ -44,7 +45,7 @@ src/codexNativeSession.js
 
 ## Archive tags
 
-로컬 annotated tag를 생성했다. 원격 push는 인증 복구 후 실행한다.
+annotated tag 7개를 생성하고 원격에 push했다. 각 tag의 dereferenced commit SHA가 아래 기준점과 일치하는지 원격에서 검증했다.
 
 ```text
 archive/agentic-diagnose  -> e427ef1db940a90f54c8e193fa2c7cf6396a70ce
@@ -60,6 +61,20 @@ archive/m9-search-final   -> 946ccb1f4ce8edec95d8696b8460c7b9a70a495c
 
 `packaging/runtime-manifest.json`에 `CaseFinderSetup.exe`를 installer entrypoint로 하는 runtime allowlist를 기록했다. `.git`, docs, tests, private blind artifacts, logs, state, credentials, build output은 installer payload에서 제외한다.
 
+## Remote branch state
+
+```text
+kept:   main
+kept:   m9r-production-baseline-cleanup
+deleted: Agentic_diagnose
+deleted: m6d-private-holdout-blind-eval
+deleted: m6e-d-a6-conditional-rescue
+deleted: m6f-d-ao-extension
+deleted: m7-codex-luna-medium-eval
+deleted: m8-provider-native-ao-v2
+deleted: m9-three-arm-blind30-prep
+```
+
 ## QA
 
 ```text
@@ -73,7 +88,7 @@ git diff --check    PASS
 ## Terminal status
 
 ```text
-M9R_PRODUCT_BASELINE_CLEAN (local cleanup branch only)
+M9R_PRODUCT_BASELINE_CLEAN
 ```
 
-원격 보존·main 승격·연구 branch 삭제까지 포함한 최종 terminal은 GitHub 재인증 후 archive tags push와 main fast-forward QA를 완료한 뒤 확정한다.
+원격 보존, main 승격, archive tag 검증, 연구 branch 삭제, product QA까지 완료했다. 다음 작업은 handoff에 따라 `main`을 기준으로 M10 productization을 시작하는 것이다.
