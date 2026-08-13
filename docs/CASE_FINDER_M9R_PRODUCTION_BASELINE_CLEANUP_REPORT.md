@@ -9,6 +9,7 @@ M9 Blind-30에서 확정된 검색 구성을 제품용 HEAD에 남기고, 연구
 ```text
 M9_FINAL_SHA = 946ccb1f4ce8edec95d8696b8460c7b9a70a495c
 cleanup branch = m9r-production-baseline-cleanup
+M9R_CLEANUP_SHA = 428cee6c
 main before promotion = 7671a3d9aab9a358cf60f4746b8e957b8ee9eac4
 ```
 
