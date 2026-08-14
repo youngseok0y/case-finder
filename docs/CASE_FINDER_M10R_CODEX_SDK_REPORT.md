@@ -2,8 +2,8 @@
 
 Terminal: `M10R_CODEX_SDK_PASS`
 Base SHA: `957793d1672869fbbdaec9f1a376e9d15357470e`
-Final SHA: working-tree validation completed; publish commit pending
-Publish commit: not created in this implementation turn
+Final SHA: `2f1e453` (implementation publish commit)
+Publish commit: `2f1e453` (`[M10-R] Migrate Luna native to Codex SDK`)
 Branch: `codex/m10r-codex-sdk`
 
 SDK version: `@openai/codex-sdk@0.147.0`
