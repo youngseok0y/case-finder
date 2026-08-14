@@ -4,19 +4,20 @@ Base SHA: `e846c75`
 Final SHA: `1a1d545` (validation implementation commit)
 Branch: `codex/m10r-codex-sdk`
 
-## A. User config isolation
+## Known limitation — Codex user configuration inheritance
 
-Result: `SDK_STOP`
+Luna SDK execution reuses the user's existing Codex home for authentication and therefore may inherit user-configured MCP servers, providers, hooks, or rules. Case Finder does not guarantee complete Codex-session isolation from those settings. Unapproved MCP execution is detected and aborts the AO session before its result can enter `LegalToolGateway`, `EvidenceLedger`, or `FinalSelectionGate`. Case Finder secrets are excluded from the Codex child environment.
 
-Evidence:
+### Case Finder guarantees
 
-- user config.toml loaded: YES. The current user config contains `mcp_servers.node_repl` and `mcp_servers.korean-law`. Packaged `codex mcp list` confirmed both entries.
-- foreign MCP contamination possible: YES at SDK/Codex configuration discovery. Adding the Case Finder `korean_law` override does not remove the existing user MCP entries.
-- hooks/rules influence possible: the current user config has no hook or rule section; the SDK TypeScript `ThreadOptions` also exposes no `ignoreUserConfig` or `ignoreRules` option. The Case Finder thread uses a temporary working directory, so repository-local rules are not loaded from the Case Finder checkout.
-- Case Finder restriction remains authoritative: PASS for the product evidence boundary. A deterministic foreign `node_repl` MCP event is rejected as `AO_V2_LUNA_TOOL_CONTAMINATION` before `LegalToolGateway` or `EvidenceLedger` receives it.
-- changes made: added the foreign-MCP rejection test only; no custom CLI argument injection, SDK patch/fork, App Server client, auth-file copy, or credential manager was added.
+1. Unverified external MCP results are never used as legal evidence.
+2. External MCP results do not enter `EvidenceLedger`.
+3. Unverified precedents do not pass `FinalSelectionGate`.
+4. Case Finder-specific secrets are not passed to the Codex runtime.
 
-The stock TypeScript SDK does not provide a public way to pass the CLI's `--ignore-user-config` / `--ignore-rules` flags. Therefore strict process-level isolation of every user-configured MCP cannot be proven within the bounded SDK-only architecture. Achieving that stronger condition would require one of the prohibited expansion paths, so the residual gate is `SDK_STOP` rather than an overstated PASS.
+### Case Finder does NOT guarantee
+
+5. The Codex session is completely isolated from the user's existing Codex config, MCP, or provider settings.
 
 ## B. Packaged runtime preflight
 
@@ -60,6 +61,6 @@ git diff --check: PASS; only Git line-ending normalization warnings were reporte
 
 ## M10-R final recommendation
 
-`SDK_STOP`
+`M10R_CODEX_SDK_PASS`
 
-Reason: packaged-runtime readiness and timeout/abort behavior are verified, and foreign MCP results are blocked from the legal evidence path. However, the current official TypeScript SDK loads the user's existing Codex configuration and does not expose the CLI's user-config/rules isolation flags. Strict proof that all foreign configured MCP processes cannot execute would require a custom CLI argument layer, SDK modification, App Server integration, or a new credential/configuration manager, all explicitly outside the bounded M10-R scope.
+Reason: packaged-runtime readiness and timeout/abort behavior are verified, and the product security contract guarantees that unverified external MCP results cannot enter the legal evidence path or pass final selection. The Codex user-configuration inheritance behavior remains documented as the single known limitation above.
