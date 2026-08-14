@@ -4,13 +4,13 @@
 
 `M10_PRODUCTIZATION_UI_BLOCKED`
 
-M10 UI/productization 구현과 주요 browser QA는 완료했지만, handoff의 시작 조건인 M9RR3 commit이 아직 존재하지 않아 Base SHA를 기록할 수 없습니다. 따라서 최종 commit 전의 working tree를 M10 PASS로 표시하지 않습니다.
+M10 UI/productization 구현과 주요 browser QA는 완료됐고 M9RR3와 M10 변경은 동작 가능한 하나의 원자적 publish commit으로 기록됐습니다. 다만 direct-success browser case, mobile `/admin` interaction, 별도 Luna console/network capture가 남아 있어 최종 terminal은 계속 BLOCKED입니다.
 
 ## Base / final
 
-- Base SHA: not recorded; M9RR3 변경이 uncommitted working tree에 있음
-- Final SHA: not recorded; 이번 작업도 commit하지 않음
-- 마지막 committed ancestor: `4909e07871bf7d6d898255bf3d88d325f4a40c0c`
+- Base SHA: `4909e07871bf7d6d898255bf3d88d325f4a40c0c` (M9RR2 마지막 committed ancestor; 공용 파일 분리를 위해 중간에 깨진 M9RR3 base commit을 만들지 않음)
+- Final SHA: `72914a7db23028af8ec4187bf6c39908c4d96c96`
+- Publish commit: `[M9RR3/M10] Publish managed runtime and product UI`
 
 ## Scope and invariants
 
@@ -97,9 +97,8 @@ Progress payloads contain only stage label, monotonic stage percentage, route, c
 
 ## Remaining blocker / follow-up
 
-1. Create the required M9RR3 PASS commit and record its exact SHA as M10 Base SHA.
-2. Run one direct-success browser case, one mobile `/admin` interaction check, and a separate Luna-tab console/network capture after the base commit.
-3. Re-run `git diff --check`, `npm run verify`, and the stable Luna golden after the final commit.
-4. Change the terminal to `M10_PRODUCTIZATION_UI_PASS` only after the above evidence is attached.
+1. Run one direct-success browser case, one mobile `/admin` interaction check, and a separate Luna-tab console/network capture.
+2. Re-run `git diff --check`, `npm run verify`, and the stable Luna golden after the final publish commit.
+3. Change the terminal to `M10_PRODUCTIZATION_UI_PASS` only after the above evidence is attached.
 
 Installer construction remains out of scope for M10.

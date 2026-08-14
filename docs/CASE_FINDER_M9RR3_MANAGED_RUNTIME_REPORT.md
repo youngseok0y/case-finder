@@ -9,7 +9,7 @@ Managed Node, stable Codex standalone, adjacent code-mode host, authenticated `c
 ## Revisions and scope
 
 - Base revision: `4909e07871bf7d6d898255bf3d88d325f4a40c0c`
-- Implementation revision: working tree, not committed
+- Implementation revision: `72914a7db23028af8ec4187bf6c39908c4d96c96`
 - Product adapters changed: none
 - Luna search algorithm, prompt, policy, tool surface, EvidenceLedger, and FinalSelectionGate changed: none
 - Private handoff, G30, and blind-evaluation artifacts: preserved and not staged
