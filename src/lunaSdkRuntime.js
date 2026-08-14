@@ -117,6 +117,9 @@ export async function inspectPackagedCodexRuntime({
   arch = process.arch,
   fsImpl = fs,
   resolvePackage = (name) => import.meta.resolve(name),
+  CodexClass = Codex,
+  source = process.env,
+  proxyPath = process.env.CODEX_LEGAL_MCP_BRIDGE || path.join(ROOT_DIR, "src", "aoV2", "restrictedMcp", "stdioServer.js"),
 } = {}) {
   const target = PLATFORM_RUNTIME[`${platform}-${arch}`];
   if (!target) throw sdkError("CODEX_SDK_PLATFORM_UNSUPPORTED", `unsupported platform: ${platform}/${arch}`);
@@ -137,7 +140,24 @@ export async function inspectPackagedCodexRuntime({
   if (!executable || !host) {
     throw sdkError("CODEX_SDK_RUNTIME_UNAVAILABLE", "packaged Codex runtime helper is missing");
   }
-  return { packageName: target.packageName, triple: target.triple, executable, host };
+  try {
+    const client = createCodexSdkClient({ CodexClass, source, proxyPath });
+    const thread = client.startThread({
+      model: config.codexModel,
+      sandboxMode: "read-only",
+      workingDirectory: ROOT_DIR,
+      skipGitRepoCheck: true,
+      modelReasoningEffort: config.codexReasoningEffort,
+      webSearchMode: "disabled",
+    });
+    if (!thread || typeof thread.runStreamed !== "function") {
+      throw new Error("SDK thread interface is unavailable");
+    }
+  } catch (error) {
+    if (error?.code === "CODEX_SDK_RUNTIME_UNAVAILABLE") throw error;
+    throw sdkError("CODEX_SDK_RUNTIME_UNAVAILABLE", "Codex SDK runtime could not be probed", error);
+  }
+  return { packageName: target.packageName, triple: target.triple, executable, host, sdkClient: true, sdkThread: true };
 }
 
 export function createCodexSdkClient({
@@ -162,6 +182,7 @@ export function createCodexSdkSessionFactory({
   CodexClass = Codex,
   source = process.env,
   proxyPath = process.env.CODEX_LEGAL_MCP_BRIDGE || path.join(ROOT_DIR, "src", "aoV2", "restrictedMcp", "stdioServer.js"),
+  sessionTimeoutMs = null,
 } = {}) {
   let sessionIndex = 0;
   return async ({
@@ -191,10 +212,12 @@ export function createCodexSdkSessionFactory({
       webSearchMode: "disabled",
     });
     const controller = new AbortController();
-    const sessionTimerMs = Math.max(30_000, Number.parseInt(
-      process.env.LUNA_SESSION_TIMEOUT_MS || String(config.codexTimeoutMs),
-      10,
-    ));
+    const configuredTimeoutMs = sessionTimeoutMs === null
+      ? Number.parseInt(process.env.LUNA_SESSION_TIMEOUT_MS || String(config.codexTimeoutMs), 10)
+      : Number(sessionTimeoutMs);
+    const sessionTimerMs = sessionTimeoutMs === null
+      ? Math.max(30_000, configuredTimeoutMs)
+      : Math.max(1, configuredTimeoutMs);
     const queue = [];
     const waiters = [];
     const calls = new Map();

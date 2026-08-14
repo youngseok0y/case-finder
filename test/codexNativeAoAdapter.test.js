@@ -81,3 +81,30 @@ test("Codex native adapter invalidates forbidden tool contamination", async () =
   assert.equal(result.telemetry.stop_reason, "AO_V2_LUNA_TOOL_CONTAMINATION");
   assert.equal(closed, true);
 });
+
+test("Codex native adapter rejects a foreign MCP tool before it reaches legal evidence", async () => {
+  const { ledger, telemetry, gateway } = makeGateway();
+  let gatewayCalls = 0;
+  gateway.execute = async () => {
+    gatewayCalls += 1;
+    return { isError: true };
+  };
+  const adapter = createCodexNativeAo({
+    gateway,
+    ledger,
+    telemetry,
+    createSession: async () => ({
+      sessionId: "session-foreign-mcp",
+      async next() {
+        return { type: "mcp_tool_call", delegated: true, name: "node_repl", arguments: {} };
+      },
+      async close() {},
+    }),
+  });
+  const result = await adapter.run("吏덈Ц");
+  assert.equal(result.protocolPass, false);
+  assert.equal(result.output_valid, false);
+  assert.equal(result.telemetry.stop_reason, "AO_V2_LUNA_TOOL_CONTAMINATION");
+  assert.equal(gatewayCalls, 0);
+  assert.equal(ledger.snapshot().cases.length, 0);
+});
