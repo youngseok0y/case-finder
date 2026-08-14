@@ -122,7 +122,8 @@ The follow-up changes preserve the M9/M10 search configuration, provider contrac
 
 ## M10-R deferral
 
-- Restore the pinned managed Codex CLI and code-mode host, or configure an accessible `CODEX_CLI_PATH` pair, then rerun Luna runtime and golden QA in M10-R.
-- The current M10 PASS excludes Luna runtime validation by explicit scope; it does not relax the Luna restricted-MCP, EvidenceLedger, FinalSelectionGate, or verified-only contracts.
+- The historical CLI-path diagnosis above is superseded by the M10-R SDK boundary. The normal product path now uses the pinned `@openai/codex-sdk` package and its platform runtime; `CODEX_CLI_PATH`, WindowsApps discovery, and manual sibling-binary placement are not required.
+- M10-R runtime evidence and the remaining quality caveat are recorded in `CASE_FINDER_M10R_CODEX_SDK_REPORT.md`.
+- The M10-R change does not relax the Luna restricted-MCP, EvidenceLedger, FinalSelectionGate, or verified-only contracts.
 
 Installer construction remains out of scope for M10.

@@ -3,58 +3,12 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { config, ROOT_DIR } from "../config.js";
 import { resolveCodexCommand } from "./codexResolver.js";
-
-const FINAL_SCHEMA = {
-  name: "m9-native-final",
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    selected: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          case_no: { type: "string" },
-          match: { type: "string", enum: ["direct", "related"] },
-        },
-        required: ["case_no", "match"],
-      },
-    },
-    intro: { type: "string" },
-  },
-  required: ["selected", "intro"],
-};
+import { CODEX_FINAL_SCHEMA } from "./codexFinalSchema.js";
+import { buildCodexChildEnv } from "./codexEnv.js";
 
 const FORBIDDEN_EVENT_TYPES = /(command_execution|shell|computer|file_search|web_search|browser|repo|git|github)/iu;
 
-const CODEX_CHILD_ENV_KEYS = Object.freeze([
-  "PATH",
-  "PATHEXT",
-  "SYSTEMROOT",
-  "WINDIR",
-  "COMSPEC",
-  "TEMP",
-  "TMP",
-  "USERPROFILE",
-  "APPDATA",
-  "LOCALAPPDATA",
-  "HOMEDRIVE",
-  "HOMEPATH",
-  "HOME",
-  "SYSTEMDRIVE",
-  "CODEX_HOME",
-]);
-
-export function buildCodexChildEnv(source = process.env, { legalMcpLogPath = "", codexHomePath = "" } = {}) {
-  const env = {};
-  for (const key of CODEX_CHILD_ENV_KEYS) {
-    if (typeof source?.[key] === "string" && source[key]) env[key] = source[key];
-  }
-  if (codexHomePath) env.CODEX_HOME = codexHomePath;
-  if (legalMcpLogPath) env.LEGAL_MCP_LOG_PATH = legalMcpLogPath;
-  return env;
-}
+export { buildCodexChildEnv } from "./codexEnv.js";
 
 function tomlString(value) {
   return JSON.stringify(String(value));
@@ -133,7 +87,7 @@ export function createCodexCliSessionFactory({
     const proxyLogPath = path.join(sessionDir, "proxy.log");
     await fs.mkdir(workdir, { recursive: true });
     await fs.mkdir(config.codexHomePath, { recursive: true });
-    await fs.writeFile(schemaPath, `${JSON.stringify(FINAL_SCHEMA, null, 2)}\n`, "utf8");
+    await fs.writeFile(schemaPath, `${JSON.stringify(CODEX_FINAL_SCHEMA, null, 2)}\n`, "utf8");
     await fs.rm(finalPath, { force: true });
 
     const args = [

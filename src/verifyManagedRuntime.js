@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveCodexCommand } from "./codexResolver.js";
+import { inspectPackagedCodexRuntime } from "./lunaSdkRuntime.js";
 import { resolveRuntimePaths } from "./runtimePaths.js";
 
 const GOLDEN_QUERY = "임차보증금을 돌려받지 못했을 때";
@@ -111,13 +111,10 @@ async function main() {
   const paths = resolveRuntimePaths({ source, appRoot });
 
   requiredFile(paths.managedNodePath, "managed node");
-  requiredFile(paths.managedCodexPath, "managed codex");
-  requiredFile(paths.managedCodexHostPath, "code-mode host");
   requiredFile(paths.serverPath, "server");
 
   const nodeVersion = versionOf(paths.managedNodePath, ["--version"]);
-  const codex = resolveCodexCommand({ source, platform: "win32", runtimePaths: paths });
-  if (codex.source !== "managed") fail("MANAGED_RESOLVER_ORDER_FAILED", `source:${codex.source}`);
+  const sdkRuntime = await inspectPackagedCodexRuntime({ platform: "win32", arch: "x64" });
 
   const port = Number.parseInt(optionValue("--port") || process.env.M9RR3_VERIFY_PORT || "3311", 10);
   const query = optionValue("--query") || GOLDEN_QUERY;
@@ -126,7 +123,6 @@ async function main() {
     CASE_FINDER_INSTALL_ROOT: installRoot,
     CASE_FINDER_APP_ROOT: appRoot,
     CASE_FINDER_ENV_PATH: process.env.CASE_FINDER_ENV_PATH || paths.envPath,
-    CODEX_HOME: paths.codexHomePath,
     PORT: String(port),
     SEARCH_ADAPTER: process.env.SEARCH_ADAPTER || "luna_native",
   };
@@ -144,10 +140,10 @@ async function main() {
     if (health.mcp?.connected !== true) fail("MANAGED_MCP_STARTUP_FAILED", "restricted MCP is not connected");
     const result = process.argv.includes("--skip-query") ? null : await runGoldenQuery(port, query);
     console.log(JSON.stringify({
-      status: "M9RR3_MANAGED_RUNTIME_PASS",
+      status: "M10R_CODEX_SDK_PASS",
       installRoot,
       nodeVersion,
-      codexVersion: codex.version,
+      sdkRuntime,
       health: { status: 200, mcpConnected: health.mcp.connected, luna: health.luna },
       golden: result,
     }));
@@ -158,7 +154,7 @@ async function main() {
 
 main().catch((error) => {
   console.error(JSON.stringify({
-    status: "M9RR3_MANAGED_RUNTIME_BLOCKED",
+    status: "M10R_CODEX_SDK_BLOCKED",
     code: error.code || "MANAGED_RUNTIME_VERIFICATION_FAILED",
     message: error.message,
   }));

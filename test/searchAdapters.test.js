@@ -165,6 +165,7 @@ test("Luna native adapter creates one persistent codex_luna search instance", as
   const second = await adapter.runNaturalQuery("two");
   assert.equal(factoryCalls, 1);
   assert.equal(runCalls, 2);
+  assert.equal(LUNA_NATIVE_EXECUTION_PIN.runtime, "codex_sdk");
   assert.deepEqual(first.executionPin, LUNA_NATIVE_EXECUTION_PIN);
   assert.deepEqual(second.executionPin, LUNA_NATIVE_EXECUTION_PIN);
 });

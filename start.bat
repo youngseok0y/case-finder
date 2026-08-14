@@ -15,15 +15,10 @@ if exist "%~dp0app\src\server.js" if exist "%~dp0runtime\node\node.exe" (
 )
 cd /d "%APP_ROOT%"
 
-if "%MANAGED_RUNTIME%"=="1" (
-  if not exist "%~dp0runtime\codex\bin\codex.exe" (
-    echo Managed Codex CLI is missing.
-    exit /b 1
-  )
-  if not exist "%~dp0runtime\codex\bin\codex-code-mode-host.exe" (
-    echo Managed Codex code-mode host is missing.
-    exit /b 1
-  )
+if "%MANAGED_RUNTIME%"=="1" if not exist "%APP_ROOT%\node_modules\@openai\codex-sdk\package.json" (
+  echo Codex SDK package is missing from the installed dependency tree.
+  echo Reinstall the application dependencies in the app directory and retry.
+  exit /b 1
 )
 
 set "APP_PORT=3300"
@@ -48,6 +43,11 @@ if "%MANAGED_RUNTIME%"=="0" if not exist "node_modules\.bin\korean-law-mcp.cmd" 
     pause
     exit /b 1
   )
+)
+
+if "%MANAGED_RUNTIME%"=="0" if not exist "node_modules\@openai\codex-sdk\package.json" (
+  echo Codex SDK package is missing after npm ci.
+  exit /b 1
 )
 
 if not exist "%CASE_FINDER_ROOT%logs" mkdir "%CASE_FINDER_ROOT%logs"

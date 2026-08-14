@@ -194,7 +194,9 @@ test("MCP stale transport cleanup closes the old handle", async () => {
 test("launcher uses the private Node runtime and preserves foreign port safety", () => {
   const launcher = fs.readFileSync(new URL("../start.bat", import.meta.url), "utf8");
   assert.match(launcher, /runtime\\node\\node\.exe/u);
-  assert.match(launcher, /runtime\\codex/u);
+  assert.doesNotMatch(launcher, /runtime\\codex/u);
+  assert.match(launcher, /node_modules\\@openai\\codex-sdk/u);
+  assert.match(launcher, /@openai\\codex-sdk/u);
   assert.match(launcher, /checkCaseFinderHealth/u);
   assert.match(launcher, /tasklist/u);
   assert.match(launcher, /Refusing to terminate an unconfirmed process/u);
@@ -207,10 +209,11 @@ test("launcher uses the private Node runtime and preserves foreign port safety",
 
 test("health exposes Luna readiness without running an LLM query", () => {
   const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
-  assert.match(server, /getCodexRuntimeStatus/u);
+  assert.match(server, /inspectPackagedCodexRuntime/u);
+  assert.doesNotMatch(server, /getCodexRuntimeStatus/u);
   assert.match(server, /luna,/u);
-  assert.match(server, /LUNA_INSTALL_REQUIRED_MESSAGE/u);
-  assert.match(server, /CODEX_HOST_UNAVAILABLE/u);
+  assert.match(server, /LUNA_SDK_RUNTIME_MESSAGE/u);
+  assert.match(server, /CODEX_SDK_RUNTIME_UNAVAILABLE/u);
 });
 
 test("direct response envelope includes the product service marker", () => {

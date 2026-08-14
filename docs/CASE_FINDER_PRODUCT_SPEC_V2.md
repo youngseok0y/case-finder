@@ -524,7 +524,6 @@ raw `.env` editor는 금지하고 whitelist 설정만 제공한다.
 SEARCH_ADAPTER
 GEMINI_API_KEY
 LAW_OC
-CODEX_CLI_PATH
 CODEX_TIMEOUT_MS
 GCP_PROJECT_ID
 ```

@@ -33,7 +33,6 @@ export const config = Object.freeze({
   geminiRetryDelayMs: 20_000,
   codexModel: "gpt-5.6-luna",
   codexReasoningEffort: "medium",
-  codexCliPath: process.env.CODEX_CLI_PATH || "",
   codexHomePath: runtimePaths.codexHomePath,
   codexWorkdir: path.resolve(process.env.CODEX_WORKDIR || runtimePaths.codexWorkdir),
   codexTimeoutMs: Math.max(30_000, Number.parseInt(process.env.CODEX_TIMEOUT_MS || "120000", 10)),

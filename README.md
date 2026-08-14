@@ -14,14 +14,12 @@
 ```text
 %LOCALAPPDATA%\Fable\CaseFinder\
   app\
+  app\node_modules\
   runtime\node\node.exe
-  runtime\codex\bin\codex.exe
-  runtime\codex\bin\codex-code-mode-host.exe
-  state\codex-home\
   logs\
 ```
 
-설치본은 private Node runtime으로 `app\src\server.js`를 실행하고, 제품 실행 중 `npm ci`를 수행하지 않아요. `CODEX_CLI_PATH`는 개발자용 override이며 managed Codex와 PATH 후보보다 낮은 우선순위가 아니고, managed 후보 다음에만 사용돼요.
+설치본은 private Node runtime으로 `app\src\server.js`를 실행하고, 제품 실행 중 `npm ci`를 수행하지 않아요. Luna는 `app\node_modules`에 고정된 `@openai/codex-sdk`와 Windows platform package를 사용하며, 시스템 PATH·WindowsApps·`CODEX_CLI_PATH`를 정상 실행 경로로 사용하지 않아요.
 
 ## 정확성·안전 계약
 
@@ -42,8 +40,6 @@ npm ci
 npm start
 ```
 
-개발자용 Codex CLI 경로가 managed runtime에 없으면 `.env` 또는 프로세스 환경에 `CODEX_CLI_PATH`를 지정할 수 있어요. 제품 설치본은 이 override 없이도 `runtime\codex\bin`의 고정 runtime을 먼저 사용해요.
-
 정적·제품 검증은 다음 명령으로 실행해요.
 
 ```text
@@ -52,7 +48,7 @@ npm run product:test
 npm run verify
 ```
 
-설치 후 검증은 설치 루트에서 managed Node, Codex, code-mode host, `/health`, restricted MCP, Luna golden 질문을 순서대로 확인해요.
+설치 후 검증은 설치 루트에서 managed Node, SDK packaged runtime, `/health`, restricted MCP, Luna 질문을 순서대로 확인해요. golden의 hit%나 자연어 문구 동일성은 참고 지표이며, SDK runtime의 안정적인 `gpt-5.6-luna`/`medium` 실행과 verified-only 계약을 통과 기준으로 삼아요.
 
 ```text
 runtime\node\node.exe app\src\verifyManagedRuntime.js --install-root "%LOCALAPPDATA%\Fable\CaseFinder"

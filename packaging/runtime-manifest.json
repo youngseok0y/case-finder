@@ -1,13 +1,11 @@
 {
-  "version": "m9rr3-managed-runtime-v1",
+  "version": "m10r-codex-sdk-v1",
   "installer_entrypoint": "CaseFinderSetup.exe",
   "install_root": "%LOCALAPPDATA%\\Fable\\CaseFinder",
   "layout": {
     "app": "app",
     "node": "runtime/node/node.exe",
-    "codex": "runtime/codex/bin/codex.exe",
-    "codex_host": "runtime/codex/bin/codex-code-mode-host.exe",
-    "codex_home": "state/codex-home",
+    "node_modules": "app/node_modules",
     "logs": "logs"
   },
   "runtime": {
@@ -16,20 +14,13 @@
       "path": "runtime/node/node.exe",
       "range": ">=24.14.0 <25"
     },
-    "codex": {
+    "codex_sdk": {
       "release": "0.147.0",
+      "package": "@openai/codex-sdk",
+      "codex_package": "@openai/codex",
+      "platform_package": "@openai/codex-win32-x64",
       "target": "x86_64-pc-windows-msvc",
-      "package": "codex-package-x86_64-pc-windows-msvc.tar.gz",
-      "sha256": "c156c8feb8cb20197bf74d2c6daffed1fec0a8c21a03bc2ca90d7ff81927b0c5",
-      "path": "runtime/codex/bin/codex.exe",
-      "host_path": "runtime/codex/bin/codex-code-mode-host.exe",
-      "resources": [
-        "runtime/codex/codex-resources/codex-command-runner.exe",
-        "runtime/codex/codex-resources/codex-windows-sandbox-setup.exe",
-        "runtime/codex/codex-path/rg.exe",
-        "runtime/codex/codex-package.json"
-      ],
-      "version_check": ["--version"]
+      "runtime_check": "src/lunaSdkRuntime.js inspectPackagedCodexRuntime"
     },
     "server": "app/src/server.js",
     "bind": "127.0.0.1",
@@ -38,18 +29,13 @@
   "include": [
     "app/src/",
     "app/public/",
+    "app/node_modules/",
     "app/prompts/plan.txt",
     "app/prompts/select.txt",
     "app/config.js",
     "app/package.json",
     "app/package-lock.json",
     "runtime/node/node.exe",
-    "runtime/codex/bin/codex.exe",
-    "runtime/codex/bin/codex-code-mode-host.exe",
-    "runtime/codex/codex-resources/codex-command-runner.exe",
-    "runtime/codex/codex-resources/codex-windows-sandbox-setup.exe",
-    "runtime/codex/codex-path/rg.exe",
-    "runtime/codex/codex-package.json",
     ".env.example",
     "start.bat"
   ],
@@ -71,13 +57,14 @@
   "runtime_dependencies": [
     "@google/genai",
     "@modelcontextprotocol/sdk",
+    "@openai/codex-sdk",
     "dotenv",
     "korean-law-mcp"
   ],
   "notes": [
-    "The installer provisions the private Node runtime and the pinned Codex CLI plus code-mode host under runtime/.",
+    "The installer provisions the private Node runtime and the pinned Codex SDK plus platform package under app/node_modules/.",
     "Final execution uses runtime/node/node.exe and never runs npm ci; dependencies are installed during packaging.",
-    "luna_native uses state/codex-home as its dedicated CODEX_HOME and never receives repository history or private blind artifacts.",
-    "CODEX_CLI_PATH is a developer-only override after the managed candidate and before PATH; arbitrary user-profile discovery is not part of the product contract."
+    "luna_native uses the SDK packaged runtime and preserves the user's existing Codex authentication source without copying auth files.",
+    "The normal product path does not use CODEX_CLI_PATH, system PATH, WindowsApps discovery, or manual Codex binary placement."
   ]
 }

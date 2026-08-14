@@ -1,5 +1,5 @@
 import { createAgenticSearchV2 } from "../aoV2/index.js";
-import { createCodexCliSessionFactory } from "../codexNativeSession.js";
+import { createCodexSdkSessionFactory } from "../lunaSdkRuntime.js";
 import { lawDetailLink } from "../directLookup.js";
 import { config } from "../../config.js";
 import { toResultContract } from "./resultContract.js";
@@ -8,7 +8,7 @@ export const LUNA_NATIVE_EXECUTION_PIN = Object.freeze({
   adapterId: "luna_native",
   provider: "codex_luna",
   architecture: "AO_V2_NATIVE",
-  runtime: "codex_cli",
+  runtime: "codex_sdk",
   model: config.codexModel,
   reasoningEffort: config.codexReasoningEffort,
   persistence: "adapter_scoped",
@@ -88,7 +88,7 @@ export function createLunaNativeAdapter({
   createSearch = (options) => createAgenticSearchV2({
     ...options,
     provider: "codex_luna",
-    adapterOptions: { createSession: createCodexCliSessionFactory(), ...(options.adapterOptions || {}) },
+    adapterOptions: { createSession: createCodexSdkSessionFactory(), ...(options.adapterOptions || {}) },
   }),
 } = {}) {
   const persistentSearch = run ? null : createSearch({ provider: "codex_luna" });
