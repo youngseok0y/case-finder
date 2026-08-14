@@ -709,14 +709,14 @@ M10의 목적은 디자인 쇼케이스가 아니라 읽기 쉬운 법률 검색
 2. 상태 구분
 3. 정보 위계
 4. 링크 식별성
-5. 좁은 화면 대응
+5. 기존 화면 스타일 유지
 6. 불필요한 시각효과 최소화
 ```
 
 필수:
 
 ```text
-responsive layout
+기존 responsive layout 유지 가능
 명확한 focus state
 button disabled/loading state
 충분한 line-height
@@ -734,24 +734,20 @@ error/notice/result 상태 구분
 정보 의미와 무관한 색상 남용
 ```
 
-## 19. Mobile / responsive
+## 19. Desktop / local PC QA
 
-최소 다음 폭에서 수동 확인한다.
+본 프로그램은 로컬 PC에서 서버를 직접 띄워 사용하는 제품이다. 모바일 전용 UI 구성과 모바일 viewport QA는 M10 필수 범위에서 제외한다.
+
+이미 구현된 responsive CSS는 되돌리지 않고 유지할 수 있지만, release gate로 모바일 폭을 검증하지 않는다.
+
+필수 확인 범위는 desktop 브라우저와 로컬 PC 운영 흐름이다.
 
 ```text
-360px
-768px
 desktop
-```
-
-360px에서 다음을 확인한다.
-
-```text
-검색 input/button 깨짐 없음
-판례 카드 overflow 없음
-긴 사건번호/링크 처리
-법령 전문 horizontal overflow 없음
-admin form 사용 가능
+localhost 운영
+검색 input/button
+판례 카드와 법령 원문
+admin form
 ```
 
 ## 20. Accessibility 최소 기준
@@ -1061,7 +1057,7 @@ managed Codex = stable 0.147.0 pin 유지
 9. status UI
 10. quota graceful UX
 11. /admin
-12. responsive / accessibility
+12. desktop accessibility
 13. automated regression
 14. browser QA
 15. Luna golden 재확인
@@ -1103,8 +1099,7 @@ npm run product:test
 npm run verify
 git diff --check
 
-browser QA
-mobile QA
+browser QA (desktop/local PC)
 console/network QA
 
 direct smoke

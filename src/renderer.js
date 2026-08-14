@@ -6,8 +6,8 @@ import {
   SEARCH_FAILED_MESSAGE,
 } from "./productMessages.js";
 
-const COURT_SERVICE_HOME = "https://help.scourt.go.kr/nm/main/index.html";
-const COURT_COPY_SERVICE = "https://help.scourt.go.kr/portal/information/trialrecord_offer/guide/index.html";
+const COURT_DECISION_VIEW_URL = "https://portal.scourt.go.kr/pgp/index.on?m=PGP202M01&l=Y&c=400";
+const COURT_DECISION_COPY_URL = "https://portal.scourt.go.kr/pgp/index.on?m=PGP201M01A&l=Y&c=300";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -71,7 +71,7 @@ function renderCase(item) {
 }
 
 function renderDirectMiss() {
-  return `<section class="state-panel state-no-result direct-miss" data-state="NO_RESULT"><h2>사건번호 조회 결과 없음</h2><p>${escapeHtml(DIRECT_LOOKUP_MISS_PRIMARY)}</p><p class="secondary-copy">${escapeHtml(DIRECT_LOOKUP_MISS_SECONDARY)}</p><div class="cta-row"><a class="secondary-button" href="${COURT_SERVICE_HOME}" target="_blank" rel="noopener noreferrer">판결서 인터넷열람 안내</a><a class="secondary-button" href="${COURT_COPY_SERVICE}" target="_blank" rel="noopener noreferrer">판결서사본 제공신청</a></div></section>`;
+  return `<section class="state-panel state-no-result direct-miss" data-state="NO_RESULT"><h2>사건번호 조회 결과 없음</h2><p>${escapeHtml(DIRECT_LOOKUP_MISS_PRIMARY)}</p><p class="secondary-copy">${escapeHtml(DIRECT_LOOKUP_MISS_SECONDARY)}</p><div class="cta-row"><a class="secondary-button" href="${escapeHtml(COURT_DECISION_VIEW_URL)}" target="_blank" rel="noopener noreferrer">판결서 인터넷열람</a><a class="secondary-button" href="${escapeHtml(COURT_DECISION_COPY_URL)}" target="_blank" rel="noopener noreferrer">판결서사본 제공신청</a></div></section>`;
 }
 
 function renderStateMessage(state, message) {
@@ -124,5 +124,5 @@ export function renderResults(result = {}) {
   const ignored = result.ignoredCaseCount > 0
     ? `<p class="notice">사건번호는 최대 5개까지만 조회했습니다. 초과한 ${escapeHtml(result.ignoredCaseCount)}개는 무시했습니다.</p>`
     : "";
-  return `<div class="fable-results" data-terminal-state="SUCCESS">${query}${intro}${fallback}${ignored}<section class="result-section"><h2>${caseHeading}</h2>${cases}</section>${lawSection}<p class="disclaimer">본 결과는 법제처 국가법령정보 Open API 데이터를 기반으로 하며, 법률 자문이 아닙니다.</p></div>`;
+  return `<div class="fable-results" data-terminal-state="SUCCESS">${query}${intro}${fallback}${ignored}${lawSection}<section class="result-section"><h2>${caseHeading}</h2>${cases}</section><p class="disclaimer">본 결과는 법제처 국가법령정보 Open API 데이터를 기반으로 하며, 법률 자문이 아닙니다.</p></div>`;
 }

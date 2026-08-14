@@ -287,9 +287,20 @@ async function lookupOne(caseRequest) {
   const candidate = candidates.find(
     (item) => caseNumberIncludes(item.caseNumber, caseRequest.caseNumber),
   );
-  if (searchResult.isError || searchText.includes("[NOT_FOUND]") || !candidate) {
+  if (searchText.includes("[NOT_FOUND]")) {
     return {
       status: "not_found",
+      caseNumber: caseRequest.caseNumber,
+      candidates: candidates.map((item) => item.caseNumber).filter(Boolean),
+    };
+  }
+
+  // An upstream/API error is not evidence that the requested case does not
+  // exist. Keep the result in the verification-failure path so the product
+  // does not show a false direct-miss message.
+  if (searchResult.isError || !candidate) {
+    return {
+      status: "search_failed",
       caseNumber: caseRequest.caseNumber,
       candidates: candidates.map((item) => item.caseNumber).filter(Boolean),
     };

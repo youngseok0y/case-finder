@@ -294,8 +294,11 @@ Secondary:
 CTA:
 
 ```text
-[판결서 인터넷열람 안내]
+[판결서 인터넷열람]
+https://portal.scourt.go.kr/pgp/index.on?m=PGP202M01&l=Y&c=400
+
 [판결서사본 제공신청]
+https://portal.scourt.go.kr/pgp/index.on?m=PGP201M01A&l=Y&c=300
 ```
 
 ---
@@ -588,14 +591,14 @@ Luna quota     64% 남음
 
 [안내문]
 
+[관련 법규]
+  조문 summary
+  [전문 보기]
+
 [관련 판례]
   모든 verified item
   판시사항
   판결요지/결정요지
-
-[관련 법규]
-  조문 summary
-  [전문 보기]
 
 [출처/면책]
 ```

@@ -59,6 +59,7 @@ button:disabled { cursor: wait; opacity: 0.62; }
 .status-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: #9aa7b8; }
 .search-status[data-state="loading"] .status-dot { background: var(--accent); }
 .search-status[data-state="success"] .status-dot { background: var(--success); }
+.search-status[data-state="notice"] .status-dot { background: var(--warning); }
 .search-status[data-state="error"] .status-dot { background: var(--danger); }
 .progress-panel { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 16px; }
 .progress-heading { display: flex; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 0.9rem; }

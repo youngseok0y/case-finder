@@ -24,6 +24,16 @@ const EVENT_RANK = {
   SEARCH_FAILED: 7,
 };
 
+const TERMINAL_STATUS = Object.freeze({
+  SUCCESS: ["검색을 완료했습니다.", "success"],
+  PARTIAL_VERIFIED: ["검색 완료 · 일부 결과를 확인했습니다.", "notice"],
+  NO_RESULT: ["검색 완료 · 표시할 결과가 없습니다.", "notice"],
+  SEARCH_FAILED: ["원문 검증에 실패했습니다.", "error"],
+  SAFETY_REJECTED: ["안전 검증으로 결과 표시가 차단되었습니다.", "error"],
+  LUNA_RUNTIME_UNAVAILABLE: ["Luna runtime을 사용할 수 없습니다.", "error"],
+  NETWORK_SERVER_ERROR: ["서버 오류로 검색을 완료하지 못했습니다.", "error"],
+});
+
 let searching = false;
 let lastProgressRank = -1;
 
@@ -62,6 +72,12 @@ function showFailure(payload) {
   setStatus(message, "error");
 }
 
+function showTerminalStatus(payload) {
+  const terminalState = payload?.result?.terminalState || payload?.terminalState || "SUCCESS";
+  const [message, state] = TERMINAL_STATUS[terminalState] || TERMINAL_STATUS.NETWORK_SERVER_ERROR;
+  setStatus(message, state);
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -97,7 +113,7 @@ async function consumeStream(response) {
         if (event === "FINAL") {
           finalReceived = true;
           if (payload.html) result.innerHTML = payload.html;
-          setStatus("검색을 완료했습니다.", "success");
+          showTerminalStatus(payload);
         } else if (event === "SEARCH_FAILED") {
           failed = true;
           showFailure(payload);

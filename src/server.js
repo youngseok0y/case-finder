@@ -16,8 +16,10 @@ import { getCodexRuntimeStatus } from "./codexResolver.js";
 import { adminSettingsView, validateAdminPatch, writeAdminSettings } from "./adminConfig.js";
 import {
   LUNA_AUTH_REQUIRED_MESSAGE,
+  LUNA_HOST_REQUIRED_MESSAGE,
   LUNA_INSTALL_REQUIRED_MESSAGE,
   LUNA_RUNTIME_ERROR_MESSAGE,
+  LUNA_VERSION_CHECK_MESSAGE,
   PRODUCT_SERVICE,
 } from "./productMessages.js";
 
@@ -176,6 +178,10 @@ async function executeQuery(query, onProgress = () => {}) {
   return { status: 200, payload: response };
 }
 
+function errorCode(error) {
+  return error?.code || String(error?.message || "").split(":", 1)[0];
+}
+
 function runtimeFailure(error) {
   return config.searchAdapter === "luna_native" && [
     "CODEX_CLI_UNAVAILABLE",
@@ -183,20 +189,25 @@ function runtimeFailure(error) {
     "CODEX_VERSION_CHECK_FAILED",
     "CODEX_SPAWN_FAILED",
     "CODEX_NATIVE_SESSION_TIMEOUT",
+    "CODEX_NATIVE_SESSION_ENDED_WITHOUT_FINAL",
+    "CODEX_NATIVE_FINAL_MISSING",
+    "CODEX_NATIVE_PROCESS_FAILED",
     "CODEX_AUTH_REQUIRED",
     "ENOENT",
     "EACCES",
     "EPERM",
-  ].includes(error?.code);
+  ].includes(errorCode(error));
 }
 
 function errorPayload(error) {
+  const code = errorCode(error);
   if (runtimeFailure(error)) {
-    const message = error?.code === "CODEX_AUTH_REQUIRED"
-      ? LUNA_AUTH_REQUIRED_MESSAGE
-      : ["CODEX_CLI_UNAVAILABLE", "CODEX_HOST_UNAVAILABLE", "CODEX_VERSION_CHECK_FAILED"].includes(error?.code)
-        ? LUNA_INSTALL_REQUIRED_MESSAGE
-        : LUNA_RUNTIME_ERROR_MESSAGE;
+    const message = {
+      CODEX_AUTH_REQUIRED: LUNA_AUTH_REQUIRED_MESSAGE,
+      CODEX_CLI_UNAVAILABLE: LUNA_INSTALL_REQUIRED_MESSAGE,
+      CODEX_HOST_UNAVAILABLE: LUNA_HOST_REQUIRED_MESSAGE,
+      CODEX_VERSION_CHECK_FAILED: LUNA_VERSION_CHECK_MESSAGE,
+    }[code] || LUNA_RUNTIME_ERROR_MESSAGE;
     return { status: 503, payload: { ok: false, terminalState: "LUNA_RUNTIME_UNAVAILABLE", message } };
   }
   return { status: 500, payload: { ok: false, terminalState: "NETWORK_SERVER_ERROR", message: "검색 처리 중 오류가 발생했습니다." } };
