@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { caseNumberKey, caseNumberMatches, expandCaseNumberSet, normalizeCaseNumber } from "../router.js";
+import { caseNumberKey, caseNumberMatches, expandCaseNumberSet, normalizeCaseNumber, parseCaseNumber } from "../router.js";
 
 function text(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -17,8 +17,6 @@ function rawCaseNumberOf(value) {
   return text(value?.caseNumber || value?.case_no || value);
 }
 
-const FULL_CASE_NUMBER = /^((?:19|20)\d{2})\s*([\uAC00-\uD7A3]{1,3})\s*(\d{1,7})$/u;
-
 export function parseProviderCompoundCaseNumber(value) {
   const rawCaseNumber = rawCaseNumberOf(value);
   if (!rawCaseNumber) return { rawCaseNumber: "", canonicalMembers: [], acceptedEvidenceKeys: [], ambiguous: true };
@@ -31,10 +29,10 @@ export function parseProviderCompoundCaseNumber(value) {
   const unparsed = [];
   let prefix = "";
   for (const part of parts) {
-    const full = part.match(FULL_CASE_NUMBER);
+    const full = parseCaseNumber(part);
     if (full) {
-      prefix = `${full[1]}${full[2]}`;
-      uniquePush(members, `${prefix}${full[3]}`);
+      prefix = `${full.year}${full.typeCode}`;
+      uniquePush(members, full.caseNumber);
       continue;
     }
     const abbreviated = part.match(/^\d{1,7}$/u);

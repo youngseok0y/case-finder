@@ -7,6 +7,7 @@ Return JSON matching the supplied response schema exactly.
 Requirements:
 - selected: at most 5 candidate entries. Use match=direct only for a strong match to the user's expressed issue; otherwise use related.
 - intro: one or two short Korean sentences, or an empty string. Do not include any case number or statute article number in intro.
+- intro는 자연스럽고 일관된 한국어 해요체(-해요/-이에요/-예요)로 작성하세요. 하십시오체(-습니다/-입니다), 반말, 보고서체를 섞지 마세요.
 
 <user_query>
 {{USER_QUERY}}

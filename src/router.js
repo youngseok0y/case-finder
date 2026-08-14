@@ -1,10 +1,22 @@
-const CASE_NO = /((?:19|20)\d{2})\s*([가-힣]{1,3})\s*(\d{1,7})/g;
+const CASE_YEAR_SOURCE = String.raw`(?:\d{2}|(?:19|20)\d{2})`;
+const CASE_NUMBER_SOURCE = String.raw`(${CASE_YEAR_SOURCE})\s*([가-힣]{1,3})\s*(\d{1,7})`;
+const CASE_NO = new RegExp(String.raw`(?<!\d)${CASE_NUMBER_SOURCE}(?!\d)`, "gu");
+const FULL_CASE_NUMBER = new RegExp(String.raw`^${CASE_NUMBER_SOURCE}$`, "u");
 
 export function normalizeCaseNumber(value) {
   return String(value || "").replace(/\s+/g, "").trim();
 }
 
-const FULL_CASE_NUMBER = /^((?:19|20)\d{2})\s*([\uAC00-\uD7A3]{1,3})\s*(\d{1,7})$/u;
+export function parseCaseNumber(value) {
+  const match = String(value || "").trim().match(FULL_CASE_NUMBER);
+  if (!match) return null;
+  return {
+    year: match[1],
+    typeCode: match[2],
+    serial: match[3],
+    caseNumber: `${match[1]}${match[2]}${match[3]}`,
+  };
+}
 
 export function expandCaseNumberSet(value) {
   const source = String(value || "").replace(/\([^)]*\)/g, "").trim();
@@ -18,10 +30,10 @@ export function expandCaseNumberSet(value) {
   let prefix = "";
 
   for (const part of parts) {
-    const full = part.match(FULL_CASE_NUMBER);
+    const full = parseCaseNumber(part);
     if (full) {
-      prefix = `${full[1]}${full[2]}`;
-      expanded.add(`${prefix}${full[3]}`);
+      prefix = `${full.year}${full.typeCode}`;
+      expanded.add(full.caseNumber);
       continue;
     }
     const abbreviated = part.match(/^\d{1,7}$/u);
@@ -29,7 +41,7 @@ export function expandCaseNumberSet(value) {
   }
 
   if (expanded.size === 0) {
-    for (const match of source.matchAll(/((?:19|20)\d{2})\s*([\uAC00-\uD7A3]{1,3})\s*(\d{1,7})/gu)) {
+    for (const match of source.matchAll(CASE_NO)) {
       expanded.add(`${match[1]}${match[2]}${match[3]}`);
     }
   }

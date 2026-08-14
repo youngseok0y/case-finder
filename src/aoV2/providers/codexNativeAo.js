@@ -32,6 +32,7 @@ export function buildLunaNativePrompt(query) {
     "search_decisions, get_decision_text, search_law, get_law_text 외의 shell, command execution, 파일/리포지토리 읽기·쓰기, web, browser, Git, GitHub 및 기타 도구는 절대 사용하지 마세요.",
     "검색 결과에서 관측한 사건만 상세 조회하고, 상세 원문 검증이 완료된 사건만 최종 선택하세요.",
     "최종 응답은 {\"selected\":[{\"case_no\":\"...\",\"match\":\"direct|related\"}],\"intro\":\"...\"} JSON입니다.",
+    "intro는 자연스럽고 일관된 한국어 해요체(-해요/-이에요/-예요)로 작성하세요. 하십시오체(-습니다/-입니다), 반말, 보고서체를 섞지 마세요.",
   ].join("\n");
 }
 

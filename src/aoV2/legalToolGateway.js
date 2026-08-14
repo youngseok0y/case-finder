@@ -57,6 +57,7 @@ export function normalizeLegalToolResult(name, raw) {
       title: item.title,
       lawId: item.lawId,
       mst: item.mst,
+      link: item.link,
     }));
     return { isError, total: items.length, items, rawText };
   }

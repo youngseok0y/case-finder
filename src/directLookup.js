@@ -175,6 +175,15 @@ export function lawDetailLink(mst) {
     : "";
 }
 
+function lawSearchItems(result) {
+  if (Array.isArray(result?.items)) return result.items;
+  return parseLawSearchResults(toolText(result));
+}
+
+function lawResultText(result) {
+  return cleanText(result?.rawText || toolText(result));
+}
+
 function cleanLawArticleText(rawText) {
   const text = cleanText(rawText);
   const articleStart = text.search(/(?:^|\n)\s*제\d+조(?:의\d+)?/);
@@ -207,16 +216,19 @@ export function parseStatuteReferences(referenceText) {
   return references;
 }
 
-export async function enrichLawReferences(referenceText, telemetry = null) {
+export async function enrichLawReferences(referenceText, telemetry = null, executeTool = null) {
   const references = parseStatuteReferences(referenceText).slice(0, config.lawMax);
   const enriched = [];
+  const execute = typeof executeTool === "function"
+    ? executeTool
+    : (name, args) => trackedCallTool(name, args, telemetry);
   for (const reference of references) {
     try {
-      const searchResult = await trackedCallTool("search_law", {
+      const searchResult = await execute("search_law", {
         query: reference.lawName,
         display: 5,
-      }, telemetry);
-      const candidates = parseLawSearchResults(toolText(searchResult));
+      });
+      const candidates = lawSearchItems(searchResult);
       const candidateNames = [reference.lawName];
       if (reference.lawName === "헌법") candidateNames.push("대한민국헌법");
       const candidate = candidates.find((item) => candidateNames.some((name) => normalizeCaseNumber(item.title) === normalizeCaseNumber(name)));
@@ -224,12 +236,13 @@ export async function enrichLawReferences(referenceText, telemetry = null) {
         enriched.push({ ...reference, text: "", link: "" });
         continue;
       }
-      const lawResult = await trackedCallTool("get_law_text", {
+      const lawResult = await execute("get_law_text", {
         mst: candidate.mst,
         jo: reference.article,
-      }, telemetry);
-      const lawText = cleanLawArticleText(toolText(lawResult));
-      if (lawResult.isError || !lawText || lawText.includes("[NOT_FOUND]")) {
+      });
+      const rawLawText = lawResultText(lawResult);
+      const lawText = cleanLawArticleText(rawLawText);
+      if (lawResult?.isError || !lawText || rawLawText.includes("[NOT_FOUND]")) {
         enriched.push({ ...reference, text: "", link: sanitizeApiLink(candidate.link, candidate.mst) || lawDetailLink(candidate.mst) });
         continue;
       }

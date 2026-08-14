@@ -1,6 +1,6 @@
 import { createAgenticSearchV2 } from "../aoV2/index.js";
 import { createCodexSdkSessionFactory } from "../lunaSdkRuntime.js";
-import { lawDetailLink } from "../directLookup.js";
+import { enrichLawReferences, lawDetailLink, parseStatuteReferences } from "../directLookup.js";
 import { config } from "../../config.js";
 import { toResultContract } from "./resultContract.js";
 
@@ -25,6 +25,71 @@ function buildLunaLawReferences(result) {
     seen.add(key);
     return Boolean(law.lawName || link);
   }).map((law) => ({ ...law, link: law.link || lawDetailLink(law.mst) }));
+}
+
+function lawReferenceKey(law) {
+  return `${law?.lawName || ""}|${law?.article || ""}|${law?.link || ""}`;
+}
+
+function lawReferenceIdentityKey(law) {
+  return `${law?.lawName || ""}|${law?.article || ""}`;
+}
+
+function renderableLawReference(law) {
+  return Boolean(law?.lawName && law?.link);
+}
+
+function uniqueLawReferences(references) {
+  const seen = new Set();
+  return references.filter((law) => {
+    if (!renderableLawReference(law)) return false;
+    const key = lawReferenceKey(law);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export async function enrichLunaRelatedLawReferences(items, { gateway, telemetry } = {}) {
+  if (!gateway || typeof gateway.execute !== "function") {
+    return { items, lawReferences: [] };
+  }
+
+  const referencesByItem = new Map();
+  const referenceTexts = [];
+  for (const item of items) {
+    if (item?.status !== "verified") continue;
+    const references = parseStatuteReferences(item.detail?.sections?.참조조문 || "");
+    referencesByItem.set(item, references);
+    if (references.length > 0) referenceTexts.push(references.map((reference) => `${reference.lawName} ${reference.article}`).join(" / "));
+  }
+  if (referenceTexts.length === 0) {
+    return { items: items.map((item) => ({ ...item, lawReferences: [] })), lawReferences: [] };
+  }
+
+  let enriched = [];
+  try {
+    enriched = await enrichLawReferences(
+      referenceTexts.join(" / "),
+      telemetry,
+      (name, args) => gateway.execute(name, args),
+    );
+  } catch {
+    enriched = [];
+  }
+
+  const enrichedByKey = new Map(enriched.map((law) => [lawReferenceIdentityKey(law), law]));
+  const enrichedItems = items.map((item) => {
+    const references = referencesByItem.get(item) || [];
+    const itemLawReferences = uniqueLawReferences(references
+      .map((reference) => enrichedByKey.get(lawReferenceIdentityKey(reference)))
+      .filter(Boolean));
+    return { ...item, lawReferences: itemLawReferences };
+  });
+  return {
+    items: enrichedItems,
+    lawReferences: uniqueLawReferences(enriched),
+  };
 }
 
 function nativeDecisionLink(domain, providerId) {
@@ -107,8 +172,17 @@ export function createLunaNativeAdapter({
       const result = context.result || {};
       const ledger = context.ledger || null;
       const items = buildLunaResultItems(result, ledger);
+      const lawEnrichment = context.gateway
+        ? await enrichLunaRelatedLawReferences(items, { gateway: context.gateway, telemetry: context.telemetry })
+        : { items, lawReferences: buildLunaLawReferences(result) };
       const candidateCaseNumbers = ledger?.getObservedCaseNumbers?.() || result.candidateCaseNumbers || [];
-      return toResultContract({ ...result, query, items, candidateCaseNumbers, lawReferences: buildLunaLawReferences(result) }, {
+      return toResultContract({
+        ...result,
+        query,
+        items: lawEnrichment.items,
+        candidateCaseNumbers,
+        lawReferences: lawEnrichment.lawReferences,
+      }, {
         adapterId: "luna_native",
         provider: "codex_luna",
         architecture: "AO_V2_NATIVE",
