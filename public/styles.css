@@ -5,12 +5,15 @@
   --line: #d9e1ec;
   --soft: #f4f7fb;
   --paper: #ffffff;
-  --accent: #2457c5;
-  --accent-dark: #1b4298;
-  --success: #16734b;
-  --warning: #8a5a00;
-  --danger: #b42318;
-  font-family: "Segoe UI", "Noto Sans KR", system-ui, sans-serif;
+  /* 넓은 면적(버튼 배경 등)은 잉크 톤으로, 틸은 좁은 포인트에만 사용 */
+  --accent: #146e79;
+  --accent-dark: #0f545d;
+  --brand-teal: #24b8c6;
+  --brand-teal-soft: #e3f5f7;
+  --success: #157a52;
+  --warning: #92600a;
+  --danger: #b3261e;
+  font-family: "Pretendard", "Pretendard Variable", system-ui, "Noto Sans KR", sans-serif;
   font-size: 16px;
 }
 
@@ -32,6 +35,8 @@ h3 { margin: 0; font-size: 1.1rem; line-height: 1.35; }
 .text-link { margin-top: 10px; font-weight: 700; }
 .status-card, .search-card, .search-status, .result-container { margin-bottom: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); box-shadow: 0 8px 24px rgba(29, 54, 91, 0.05); }
 .status-card, .search-card { padding: 24px; }
+/* 브랜드 밴드 — 카드뉴스 테두리 규칙을 웹 카드 상단 라인으로 축소 응용 */
+.status-card, .search-card, .result-container { border-top: 4px solid var(--brand-teal); }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .compact-heading { margin-bottom: 18px; }
 .compact-heading h2 { margin-bottom: 0; }
@@ -83,7 +88,7 @@ button:disabled { cursor: wait; opacity: 0.62; }
 .case-card { padding: 18px 0; border-bottom: 1px solid var(--line); }
 .case-card:last-child { border-bottom: 0; }
 .case-card-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.match-label { flex: 0 0 auto; padding: 3px 8px; border-radius: 999px; background: #e9f1ff; color: var(--accent-dark); font-size: 0.76rem; font-weight: 800; }
+.match-label { flex: 0 0 auto; padding: 3px 8px; border-radius: 999px; background: var(--brand-teal-soft); color: var(--accent-dark); font-size: 0.76rem; font-weight: 800; }
 .case-number { overflow-wrap: anywhere; }
 .case-detail { margin: 14px 0 0; }
 .case-detail > div { margin-top: 12px; }
