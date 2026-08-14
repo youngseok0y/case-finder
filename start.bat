@@ -1,22 +1,46 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-cd /d "%~dp0"
 
-set "APP_PORT=3300"
-if exist ".env" (
-  for /f "usebackq tokens=1,* delims==" %%A in (".env") do if "%%A"=="PORT" set "APP_PORT=%%B"
+set "CASE_FINDER_ROOT=%~dp0"
+set "APP_ROOT=%~dp0"
+set "NODE_EXE=node.exe"
+set "MANAGED_RUNTIME=0"
+if exist "%~dp0app\src\server.js" if exist "%~dp0runtime\node\node.exe" (
+  set "MANAGED_RUNTIME=1"
+  set "APP_ROOT=%~dp0app"
+  set "NODE_EXE=%~dp0runtime\node\node.exe"
+  set "CASE_FINDER_INSTALL_ROOT=%~dp0"
+  set "CASE_FINDER_APP_ROOT=%~dp0app"
+  set "CASE_FINDER_ENV_PATH=%~dp0.env"
+)
+cd /d "%APP_ROOT%"
+
+if "%MANAGED_RUNTIME%"=="1" (
+  if not exist "%~dp0runtime\codex\bin\codex.exe" (
+    echo Managed Codex CLI is missing.
+    exit /b 1
+  )
+  if not exist "%~dp0runtime\codex\bin\codex-code-mode-host.exe" (
+    echo Managed Codex code-mode host is missing.
+    exit /b 1
+  )
 )
 
-for /f "tokens=1" %%V in ('node --version') do set "NODE_VERSION=%%V"
+set "APP_PORT=3300"
+if exist "%~dp0.env" (
+  for /f "usebackq tokens=1,* delims==" %%A in ("%~dp0.env") do if "%%A"=="PORT" set "APP_PORT=%%B"
+)
+
+for /f "tokens=1" %%V in ('"!NODE_EXE!" --version') do set "NODE_VERSION=%%V"
 powershell.exe -NoProfile -Command "$v = [version]'!NODE_VERSION:~1!'; if ($v -ge [version]'24.14.0' -and $v -lt [version]'25.0.0') { exit 0 } else { exit 1 }"
 if errorlevel 1 (
   echo Node.js ^>=24.14.0 and ^<25 is required.
-  node --version
+  "!NODE_EXE!" --version
   pause
   exit /b 1
 )
 
-if not exist "node_modules\.bin\korean-law-mcp.cmd" (
+if "%MANAGED_RUNTIME%"=="0" if not exist "node_modules\.bin\korean-law-mcp.cmd" (
   echo Installing dependencies with npm ci.
   call npm ci
   if errorlevel 1 (
@@ -26,7 +50,7 @@ if not exist "node_modules\.bin\korean-law-mcp.cmd" (
   )
 )
 
-if not exist "logs" mkdir "logs"
+if not exist "%CASE_FINDER_ROOT%logs" mkdir "%CASE_FINDER_ROOT%logs"
 set "SERVER_PID="
 
 call :startServer
@@ -90,7 +114,7 @@ if defined PORT_PID (
 
 echo Starting server...
 set "SERVER_PID="
-start "" /b node.exe src/server.js
+start "" /b "!NODE_EXE!" "!APP_ROOT!\src\server.js"
 
 for /l %%S in (1,1,60) do (
   call :findPortPid

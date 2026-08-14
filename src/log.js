@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { ROOT_DIR } from "../config.js";
+import { config } from "../config.js";
 
-const logsDir = path.join(ROOT_DIR, "logs");
+const logsDir = config.runtimePaths.logsPath;
 const errorLog = path.join(logsDir, "error.log");
 const validationLog = path.join(logsDir, "validation.log");
 

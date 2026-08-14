@@ -1,19 +1,55 @@
 {
-  "version": "m9r-production-baseline-v1",
+  "version": "m9rr3-managed-runtime-v1",
   "installer_entrypoint": "CaseFinderSetup.exe",
+  "install_root": "%LOCALAPPDATA%\\Fable\\CaseFinder",
+  "layout": {
+    "app": "app",
+    "node": "runtime/node/node.exe",
+    "codex": "runtime/codex/bin/codex.exe",
+    "codex_host": "runtime/codex/bin/codex-code-mode-host.exe",
+    "codex_home": "state/codex-home",
+    "logs": "logs"
+  },
   "runtime": {
-    "node": ">=24.14.0 <25",
-    "server": "src/server.js",
+    "node": {
+      "version": "24.14.0",
+      "path": "runtime/node/node.exe",
+      "range": ">=24.14.0 <25"
+    },
+    "codex": {
+      "release": "0.147.0",
+      "target": "x86_64-pc-windows-msvc",
+      "package": "codex-package-x86_64-pc-windows-msvc.tar.gz",
+      "sha256": "c156c8feb8cb20197bf74d2c6daffed1fec0a8c21a03bc2ca90d7ff81927b0c5",
+      "path": "runtime/codex/bin/codex.exe",
+      "host_path": "runtime/codex/bin/codex-code-mode-host.exe",
+      "resources": [
+        "runtime/codex/codex-resources/codex-command-runner.exe",
+        "runtime/codex/codex-resources/codex-windows-sandbox-setup.exe",
+        "runtime/codex/codex-path/rg.exe",
+        "runtime/codex/codex-package.json"
+      ],
+      "version_check": ["--version"]
+    },
+    "server": "app/src/server.js",
     "bind": "127.0.0.1",
     "adapters": ["gemini_d", "luna_native"]
   },
   "include": [
-    "src/",
-    "public/",
-    "prompts/plan.txt",
-    "prompts/select.txt",
-    "package.json",
-    "package-lock.json",
+    "app/src/",
+    "app/public/",
+    "app/prompts/plan.txt",
+    "app/prompts/select.txt",
+    "app/config.js",
+    "app/package.json",
+    "app/package-lock.json",
+    "runtime/node/node.exe",
+    "runtime/codex/bin/codex.exe",
+    "runtime/codex/bin/codex-code-mode-host.exe",
+    "runtime/codex/codex-resources/codex-command-runner.exe",
+    "runtime/codex/codex-resources/codex-windows-sandbox-setup.exe",
+    "runtime/codex/codex-path/rg.exe",
+    "runtime/codex/codex-package.json",
     ".env.example",
     "start.bat"
   ],
@@ -39,8 +75,9 @@
     "korean-law-mcp"
   ],
   "notes": [
-    "The installer may install multiple internal processes; it is not required to be a single-process executable.",
-    "Codex CLI/App Server is provisioned separately for luna_native and never receives repository history or private blind artifacts.",
-    "Optional dependency slimming is deferred to the packaging checkpoint."
+    "The installer provisions the private Node runtime and the pinned Codex CLI plus code-mode host under runtime/.",
+    "Final execution uses runtime/node/node.exe and never runs npm ci; dependencies are installed during packaging.",
+    "luna_native uses state/codex-home as its dedicated CODEX_HOME and never receives repository history or private blind artifacts.",
+    "CODEX_CLI_PATH is a developer-only override after the managed candidate and before PATH; arbitrary user-profile discovery is not part of the product contract."
   ]
 }

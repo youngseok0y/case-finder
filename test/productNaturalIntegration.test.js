@@ -63,7 +63,7 @@ test("Luna Native adapter → contract → validator → renderer keeps verified
   assert.equal(result.provider, "codex_luna");
   assert.equal(result.items.length, 1);
   assert.match(html, /2020나2027066/u);
-  assert.match(html, /판시내용/u);
+  assert.match(html, /판시사항/u);
 });
 
 test("Luna adapter preserves its input query for normal and safety results", async () => {

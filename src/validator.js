@@ -34,11 +34,16 @@ export async function validateDirectResult(result) {
     }
   }
 
+  const directMiss = (result.items || []).length > 0
+    && (result.items || []).every((item) => item.status === "not_found")
+    && validItems.length === 0;
   return {
     ...result,
     items: validItems,
     validationFailures: failures,
-    terminalState: deriveTerminalState({ ...result, validationFailures: failures }, true, validItems),
+    terminalState: directMiss
+      ? "NO_RESULT"
+      : deriveTerminalState({ ...result, validationFailures: failures }, true, validItems),
   };
 }
 

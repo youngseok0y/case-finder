@@ -1,37 +1,50 @@
 # Fable Case Finder
 
-법제처 국가법령정보 Open API에 실제로 존재하는 판례·법령 원문만 표시하는 로컬 판례 검색기입니다. 법률 자문이 아니라 검색·정리 도구입니다.
+법제처 Open API 원문과 검증된 상세 조회만으로 동작하는 로컬 판례 검색기예요. 제품 adapter는 `gemini_d`와 `luna_native`만 지원하며, Luna 실패를 Gemini로 자동 전환하지 않아요.
 
-## 제품 검색 구성
+## 제품 설치·실행
 
-사용자에게 제공하는 검색 adapter는 두 가지입니다.
+1. 배포된 `CaseFinderSetup.exe`를 실행해 설치해요.
+2. 설치 후 생성된 `.env`에 `LAW_OC`를 입력해요.
+3. `luna_native`를 사용할 때는 Codex/Luna 로그인을 완료해요.
+4. `Case Finder`를 실행해 `http://127.0.0.1:3300`을 열어요.
 
-- `gemini_d` — Gemini 빠른 검색: 결정론적 검색계획, 법제처 후보 검색, 후보 내 선별
-- `luna_native` — Luna 고정밀 검색: GPT-5.6 Luna medium, Native AO-v2, restricted legal MCP, EvidenceLedger, FinalSelectionGate
+설치본은 다음 구조를 사용해요.
 
-Gemini A6와 Gemini AO-v2는 연구 history에 보존하지 않고 제품 runtime에는 포함하지 않습니다. Luna 실행 실패 시 Gemini로 자동 전환하지 않습니다.
+```text
+%LOCALAPPDATA%\Fable\CaseFinder\
+  app\
+  runtime\node\node.exe
+  runtime\codex\bin\codex.exe
+  runtime\codex\bin\codex-code-mode-host.exe
+  state\codex-home\
+  logs\
+```
 
-## 설치·실행
+설치본은 private Node runtime으로 `app\src\server.js`를 실행하고, 제품 실행 중 `npm ci`를 수행하지 않아요. `CODEX_CLI_PATH`는 개발자용 override이며 managed Codex와 PATH 후보보다 낮은 우선순위가 아니고, managed 후보 다음에만 사용돼요.
 
-1. Node.js `>=24.14.0 <25`를 설치합니다.
-2. `.env.example`을 `.env`로 복사합니다.
-3. `LAW_OC`에 법제처 Open API 인증키를 입력합니다.
-4. Gemini를 사용할 경우 `GEMINI_API_KEY`를 입력합니다.
-5. `SEARCH_ADAPTER`를 `gemini_d` 또는 `luna_native`로 선택합니다.
-6. 최초 1회 `npm ci`를 실행한 뒤 `start.bat` 또는 `npm start`를 실행합니다.
-7. 브라우저에서 `http://127.0.0.1:3300`을 엽니다.
+## 정확성·안전 계약
 
-Luna를 선택하면 `CODEX_CLI_PATH`와 Codex 로그인 상태가 필요합니다. Codex native session은 질문별 작업 디렉터리를 `state/codex-runtime` 아래에 만들며, `.env`와 인증 토큰을 결과나 로그에 기록하지 않습니다.
+- 판례·법령 원문은 법제처 API 원문만 사용해요.
+- Gemini는 검색어 생성과 후보 목록 안의 선택만 수행해요.
+- 출력 전 사건번호의 후보 존재와 상세 조회 성공을 모두 검증해요.
+- 검증되지 않은 사건번호나 임의 링크를 결과에 넣지 않아요.
+- Luna는 restricted legal MCP, EvidenceLedger, FinalSelectionGate, verified-only output을 유지해요.
+- 직접 사건번호 조회에는 LLM을 호출하지 않아요.
 
-## 정확성·안전 원칙
+## 개발 설치
 
-- 사건번호, 법원, 선고일, 판시사항, 판결요지·결정요지, 법령 조문과 공식 링크는 provider 원문·메타데이터에서만 가져옵니다.
-- 최종 판례는 provider 검색 관측, 상세 조회 성공, 상세 identity 검증을 모두 통과해야 표시됩니다.
-- Luna는 restricted legal MCP만 사용하며 EvidenceLedger와 FinalSelectionGate를 우회하지 않습니다.
-- 검증되지 않은 사건번호나 찾지 못한 판례를 채워 넣지 않습니다.
-- 직접 사건번호 조회는 LLM을 호출하지 않습니다.
+개발 환경에서는 Node.js `>=24.14.0 <25`를 사용해요.
 
-## 개발 검증
+```text
+copy .env.example .env
+npm ci
+npm start
+```
+
+개발자용 Codex CLI 경로가 managed runtime에 없으면 `.env` 또는 프로세스 환경에 `CODEX_CLI_PATH`를 지정할 수 있어요. 제품 설치본은 이 override 없이도 `runtime\codex\bin`의 고정 runtime을 먼저 사용해요.
+
+정적·제품 검증은 다음 명령으로 실행해요.
 
 ```text
 npm run check
@@ -39,12 +52,12 @@ npm run product:test
 npm run verify
 ```
 
-검증 세트는 Luna safety, EvidenceLedger, FinalSelectionGate, restricted legal tool surface, compound case identity, adapter pinning을 포함합니다. 실제 법제처·모델 호출이 필요한 운영 검증은 별도 인증키와 실행 환경에서 수행합니다.
+설치 후 검증은 설치 루트에서 managed Node, Codex, code-mode host, `/health`, restricted MCP, Luna golden 질문을 순서대로 확인해요.
 
-## 운영 파일
+```text
+runtime\node\node.exe app\src\verifyManagedRuntime.js --install-root "%LOCALAPPDATA%\Fable\CaseFinder"
+```
 
-- `state/`: quota·Codex native session 등 runtime writable state
-- `logs/`: 오류와 validator 기록
-- `.env`: 로컬 전용 설정이며 커밋하지 않습니다.
+제품 UI는 기존 `POST /ask` JSON 호환성을 유지하면서 `POST /ask/stream` SSE를 사용해 실제 검색 단계만 표시해요. 로컬 설정은 `/admin`에서 whitelist 필드로 저장하며, secret 실제 값은 조회 응답에 반환하지 않아요. 저장한 설정은 서버 재시작 후 적용돼요.
 
-상세 설계와 정확성 계약은 [case-finder-spec.md](./case-finder-spec.md)를 canonical specification으로 사용합니다. M9 결과와 제품 구성 결정은 [M9 최종 보고서](./docs/CASE_FINDER_FINAL_REPORT_M9_BLIND30.md)에 기록되어 있습니다.
+상세 명세는 [case-finder-spec.md](./case-finder-spec.md), M9RR3 구현 계약은 [runtime-manifest.json](./packaging/runtime-manifest.json)을 기준으로 해요.

@@ -52,7 +52,7 @@ export function createCodexNativeAo({
 
   return {
     provider: "codex_luna",
-    async run(query) {
+    async run(query, { onProgress = () => {} } = {}) {
       telemetry.setQuestionScopeId(ledger.scopeId);
       const startedAt = Date.now();
       const recordDelegatedToolResult = ({ name, arguments: args = {}, result: toolResult } = {}) => {
@@ -60,6 +60,15 @@ export function createCodexNativeAo({
           ? toolResult
           : normalizeLegalToolResult(name, toolResult || {});
         if (!normalized || normalized.isError) return;
+        const snapshot = ledger.snapshot();
+        const progress = {
+          candidateCount: snapshot.cases.filter((item) => item.discovered).length,
+          verifiedCount: snapshot.cases.filter((item) => item.detailVerified).length,
+          lawCount: snapshot.laws.filter((item) => item.observed).length,
+        };
+        if (name === "search_law" || name === "get_law_text") onProgress("LAW_EVIDENCE_UPDATED", progress);
+        if (name === "search_decisions") onProgress("CANDIDATES_FOUND", progress);
+        if (name === "get_decision_text") onProgress("DETAIL_VERIFIED", progress);
         if (name === "search_decisions") {
           ledger.recordDecisionSearch({ query: args?.query, domain: args?.domain, items: normalized.items || [] });
         } else if (name === "search_law") {
@@ -148,6 +157,11 @@ export function createCodexNativeAo({
             continue;
           }
           if (event.type === "final") {
+            onProgress("FINALIZING", {
+              candidateCount: ledger.snapshot().cases.filter((item) => item.discovered).length,
+              verifiedCount: ledger.snapshot().cases.filter((item) => item.detailVerified).length,
+              lawCount: ledger.snapshot().laws.filter((item) => item.observed).length,
+            });
             telemetry.setSessionId(event.session_id || event.sessionId || session?.sessionId || null);
             if (event.usage || event.elapsedMs) telemetry.recordModelTurn({ usage: event.usage || {}, elapsedMs: event.elapsedMs || 0 });
             const attempt = event.selection || event.value || event;

@@ -2,8 +2,7 @@ import fsSync from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { config } from "../config.js";
-
-export const CODEX_CODE_MODE_HOST_NAME = "codex-code-mode-host.exe";
+import { CODEX_CODE_MODE_HOST_NAME, resolveRuntimePaths } from "./runtimePaths.js";
 
 const WINDOWS_ENV_KEYS = Object.freeze([
   "PATH",
@@ -20,19 +19,15 @@ const WINDOWS_ENV_KEYS = Object.freeze([
   "HOMEPATH",
   "HOME",
   "SYSTEMDRIVE",
-  "CODEX_HOME",
 ]);
 
 function isAlias(value) {
-  return !value || value.toLowerCase() === "codex" || value.toLowerCase() === "codex.exe";
+  const normalized = String(value || "").trim().toLowerCase();
+  return !normalized || normalized === "codex" || normalized === "codex.exe";
 }
 
 function safeExists(fsImpl, value) {
   try { return Boolean(value) && fsImpl.existsSync(value); } catch { return false; }
-}
-
-function safeReadDir(fsImpl, value) {
-  try { return fsImpl.readdirSync(value, { withFileTypes: true }); } catch { return []; }
 }
 
 function pushUnique(list, seen, candidate) {
@@ -41,8 +36,8 @@ function pushUnique(list, seen, candidate) {
   list.push(candidate);
 }
 
-function executableCandidate(executablePath, { processExecPath = process.execPath } = {}) {
-  const normalized = String(executablePath || "");
+function executableCandidate(executablePath, { source = "unknown", processExecPath = process.execPath } = {}) {
+  const normalized = String(executablePath || "").trim();
   if (!normalized) return null;
   const isNodeScript = path.extname(normalized).toLowerCase() === ".js";
   const launchPath = isNodeScript ? processExecPath : normalized;
@@ -50,6 +45,7 @@ function executableCandidate(executablePath, { processExecPath = process.execPat
     command: launchPath,
     prefixArgs: isNodeScript ? [normalized] : [],
     shell: false,
+    source,
     executablePath: normalized,
     hostPath: path.join(path.dirname(normalized), CODEX_CODE_MODE_HOST_NAME),
   };
@@ -85,45 +81,29 @@ export function discoverCodexCandidates({
   fsImpl = fsSync,
   execFile = execFileSync,
   processExecPath = process.execPath,
+  runtimePaths = resolveRuntimePaths({ appRoot: config.runtimePaths?.appRoot }),
 } = {}) {
-  if (platform !== "win32") {
-    return [executableCandidate(configured, { processExecPath })].filter(Boolean);
-  }
-
   const candidates = [];
   const seen = new Set();
-  const add = (value) => pushUnique(candidates, seen, executableCandidate(value, { processExecPath }));
+  const add = (value, sourceName) => pushUnique(
+    candidates,
+    seen,
+    executableCandidate(value, { source: sourceName, processExecPath }),
+  );
 
-  if (!isAlias(configured)) add(configured);
-  for (const value of whereCandidates({ execFile })) add(value);
-
-  const userProfile = source?.USERPROFILE || "";
-  const appData = source?.APPDATA || "";
-  const localAppData = source?.LOCALAPPDATA || "";
-  const programFiles = source?.ProgramFiles || "C:\\Program Files";
-
-  if (userProfile) {
-    const pluginRoot = path.join(userProfile, ".codex", "plugins");
-    for (const entry of safeReadDir(fsImpl, pluginRoot)) {
-      if (entry.isDirectory()) add(path.join(pluginRoot, entry.name, "codex.exe"));
-    }
-    add(path.join(userProfile, ".codex", ".sandbox-bin", "codex.exe"));
+  if (platform === "win32") {
+    add(runtimePaths.managedCodexPath, "managed");
+    if (!isAlias(configured)) add(configured, "override");
+    for (const value of whereCandidates({ execFile })) add(value, "path");
+    return candidates;
   }
 
-  if (appData) {
-    add(path.join(appData, "npm", "node_modules", "@openai", "codex", "bin", "codex.js"));
-  }
-
-  for (const root of [
-    path.join(localAppData, "Programs", "Codex"),
-    path.join(localAppData, "Programs", "OpenAI", "Codex"),
-    path.join(programFiles, "Codex"),
-    path.join(programFiles, "OpenAI", "Codex"),
-  ]) {
-    add(path.join(root, "codex.exe"));
-  }
-
+  if (!isAlias(configured)) add(configured, "override");
   return candidates;
+}
+
+function validationFailure(candidate, code, message) {
+  return { ok: false, candidate, code, message };
 }
 
 export function validateCodexCandidate(candidate, {
@@ -132,20 +112,38 @@ export function validateCodexCandidate(candidate, {
   source = process.env,
   versionTimeoutMs = 10_000,
 } = {}) {
-  if (!candidate || !safeExists(fsImpl, candidate.executablePath)) return false;
-  if (!safeExists(fsImpl, candidate.hostPath)) return false;
+  if (!candidate || !safeExists(fsImpl, candidate.executablePath)) {
+    return validationFailure(candidate, "CODEX_CLI_UNAVAILABLE", "Codex CLI executable is missing");
+  }
+  if (!safeExists(fsImpl, candidate.hostPath)) {
+    return validationFailure(candidate, "CODEX_HOST_UNAVAILABLE", "Codex code-mode host is missing");
+  }
   try {
-    execFile(candidate.command, [...candidate.prefixArgs, "--version"], {
+    const version = String(execFile(candidate.command, [...candidate.prefixArgs, "--version"], {
       cwd: source?.USERPROFILE || undefined,
       env: buildProbeEnv(source),
-      stdio: "ignore",
+      encoding: "utf8",
       windowsHide: true,
       timeout: versionTimeoutMs,
-    });
-    return true;
-  } catch {
-    return false;
+    })).trim();
+    if (!version) return validationFailure(candidate, "CODEX_VERSION_CHECK_FAILED", "Codex version output is empty");
+    return { ok: true, candidate, version };
+  } catch (error) {
+    return validationFailure(candidate, "CODEX_VERSION_CHECK_FAILED", "Codex --version failed", error);
   }
+}
+
+function resolutionError(code, message, results, fsImpl = fsSync) {
+  const error = new Error(`${code}: ${message}`);
+  error.code = code;
+  error.results = results;
+  error.codexAvailable = results.some((result) => result.candidate && safeExists(fsImpl, result.candidate.executablePath));
+  error.codeModeHostAvailable = results.some(
+    (result) => result.candidate
+      && safeExists(fsImpl, result.candidate.executablePath)
+      && safeExists(fsImpl, result.candidate.hostPath),
+  );
+  return error;
 }
 
 export function resolveCodexCommand({
@@ -155,11 +153,8 @@ export function resolveCodexCommand({
   fsImpl = fsSync,
   execFile = execFileSync,
   processExecPath = process.execPath,
+  runtimePaths = resolveRuntimePaths({ appRoot: config.runtimePaths?.appRoot }),
 } = {}) {
-  if (platform !== "win32") {
-    return executableCandidate(configured, { processExecPath });
-  }
-
   const candidates = discoverCodexCandidates({
     configured,
     source,
@@ -167,15 +162,42 @@ export function resolveCodexCommand({
     fsImpl,
     execFile,
     processExecPath,
+    runtimePaths,
   });
-  const valid = candidates.find((candidate) => validateCodexCandidate(candidate, {
+  if (platform !== "win32" && !candidates.length) {
+    throw resolutionError("CODEX_CLI_UNAVAILABLE", "no Codex CLI override was configured", [], fsImpl);
+  }
+
+  const results = candidates.map((candidate) => validateCodexCandidate(candidate, {
     fsImpl,
     execFile,
     source,
   }));
-  if (valid) return valid;
+  const valid = results.find((result) => result.ok);
+  if (valid) return { ...valid.candidate, version: valid.version };
 
-  const error = new Error("CODEX_CLI_UNAVAILABLE: no executable Codex CLI with code-mode host was found");
-  error.code = "CODEX_CLI_UNAVAILABLE";
-  throw error;
+  const lastFailure = results.at(-1);
+  const code = lastFailure?.code || "CODEX_CLI_UNAVAILABLE";
+  const message = lastFailure?.message || "no executable Codex CLI was found";
+  throw resolutionError(code, message, results, fsImpl);
+}
+
+export function getCodexRuntimeStatus(options = {}) {
+  try {
+    const resolved = resolveCodexCommand(options);
+    return {
+      configured: true,
+      codexAvailable: true,
+      codeModeHostAvailable: true,
+      version: resolved.version,
+    };
+  } catch (error) {
+    return {
+      configured: true,
+      codexAvailable: Boolean(error.codexAvailable),
+      codeModeHostAvailable: Boolean(error.codeModeHostAvailable),
+      version: "",
+      errorCode: error.code || "CODEX_CLI_UNAVAILABLE",
+    };
+  }
 }

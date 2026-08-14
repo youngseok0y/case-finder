@@ -103,7 +103,7 @@ export function createLunaNativeAdapter({
     async runNaturalQuery(query, options = {}) {
       const context = run
         ? { result: await run(query, { ...options, provider: "codex_luna" }), ledger: null }
-        : await persistentSearch.runWithContext(query);
+        : await persistentSearch.runWithContext(query, options);
       const result = context.result || {};
       const ledger = context.ledger || null;
       const items = buildLunaResultItems(result, ledger);

@@ -419,6 +419,7 @@ export async function finalizeSelection({
 
 export async function runDeterministicPipeline(query, dependencies = {}) {
   const startedAt = Date.now();
+  const reportProgress = typeof dependencies.onProgress === "function" ? dependencies.onProgress : () => {};
   const pinnedRuntime = dependencies.runtime || {};
   const effectiveRuntimeName = dependencies.runtimeName || pinnedRuntime.runtimeName || runtimeName;
   const effectiveModelName = dependencies.modelName || pinnedRuntime.modelName || modelName;
@@ -474,6 +475,7 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
       law_name_count: plan.law_names.length,
     };
   }
+  reportProgress("ANALYSIS_COMPLETE");
 
   const [rawCandidates, planLawReferences, queryLawReferences] = await Promise.all([
     collectCandidatesFn(plan, telemetry),
@@ -485,6 +487,14 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     dTrace.candidates.raw_summary = candidateSummary(rawCandidates);
   }
   const lawReferences = queryLawReferences.length > 0 ? queryLawReferences : planLawReferences;
+  reportProgress("LAW_EVIDENCE_UPDATED", {
+    candidateCount: rawCandidates.length,
+    lawCount: lawReferences.length,
+  });
+  reportProgress("CANDIDATES_FOUND", {
+    candidateCount: rawCandidates.length,
+    lawCount: lawReferences.length,
+  });
   const prepared = await prepareCandidatesFn(rawCandidates, telemetry);
   let selection;
   try {
@@ -494,6 +504,10 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     fallbackLabel = getFallbackLabel(error);
   }
   recordSelectionTrace(dTrace, selection, prepared.candidatesWithPreview);
+  reportProgress("FINALIZING", {
+    candidateCount: prepared.candidatesWithPreview.length,
+    lawCount: lawReferences.length,
+  });
   const finalResult = await finalizeSelectionFn({
     query,
     candidatesWithPreview: prepared.candidatesWithPreview,
@@ -502,6 +516,11 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     fallbackLabel,
     lawReferences,
     telemetry,
+  });
+  reportProgress("DETAIL_VERIFIED", {
+    candidateCount: prepared.candidatesWithPreview.length,
+    verifiedCount: (finalResult.items || []).filter((item) => item.status === "verified").length,
+    lawCount: lawReferences.length,
   });
   if (dTrace) {
     const finalSelected = Array.isArray(finalResult.selected) ? finalResult.selected : [];

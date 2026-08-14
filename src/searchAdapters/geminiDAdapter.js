@@ -21,6 +21,7 @@ function pinnedDependencies(options) {
     runtimeName: "gemini",
     modelName: config.geminiModel,
     reasoningEffort: null,
+    onProgress: options.onProgress,
   };
 }
 

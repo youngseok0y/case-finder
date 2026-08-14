@@ -3,55 +3,75 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Fable 판례 검색기</title>
-    <style>
-      :root { color-scheme: light; font-family: system-ui, sans-serif; }
-      body { max-width: 760px; margin: 0 auto; padding: 32px 20px; color: #1f2937; }
-      h1 { margin-bottom: 8px; }
-      form { display: flex; gap: 8px; margin: 24px 0; }
-      input { flex: 1; padding: 12px; font-size: 16px; }
-      button { padding: 12px 18px; cursor: pointer; }
-      #result { border-top: 1px solid #d1d5db; padding-top: 20px; min-height: 80px; }
-      section { margin-top: 24px; }
-      h2 { font-size: 20px; }
-      h3 { margin-bottom: 4px; }
-      .metadata, .notice, .empty, .disclaimer { color: #6b7280; }
-      .case { border-bottom: 1px solid #e5e7eb; padding: 12px 0; }
-      .case-detail p { white-space: pre-wrap; line-height: 1.6; }
-      .law-label { font-weight: 600; }
-      footer { margin-top: 40px; color: #6b7280; font-size: 13px; }
-    </style>
+    <meta name="description" content="법제처 원문과 검증된 상세 조회를 기반으로 하는 로컬 판례·법령 검색기">
+    <title>Case Finder · 판례 검색</title>
+    <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <h1>Fable 판례 검색기</h1>
-    <p>법제처 국가법령정보 Open API 기반 검색 골격</p>
-    <form id="ask-form">
-      <input id="query" name="query" maxlength="10000" placeholder="사건번호 또는 법률 질문을 입력하세요" required>
-      <button type="submit">검색</button>
-    </form>
-    <div id="result" aria-live="polite">질문을 입력해 주세요.</div>
-    <footer>본 결과는 법제처 국가법령정보 Open API 데이터를 기반으로 하며, 법률 자문이 아닙니다.</footer>
-    <script>
-      const form = document.querySelector("#ask-form");
-      const query = document.querySelector("#query");
-      const result = document.querySelector("#result");
+    <a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+    <header class="site-header shell">
+      <div>
+        <p class="brand-kicker">FABLE LEGAL SEARCH</p>
+        <h1>Case Finder</h1>
+        <p class="subtitle">사건번호 또는 자연어 질문으로 판례·법령 원문을 찾아보세요.</p>
+      </div>
+      <a class="text-link" href="/admin">설정</a>
+    </header>
 
-      form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        result.textContent = "법령센터 검색 중… (수 초 소요)";
-        try {
-          const response = await fetch("/ask", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ query: query.value }),
-          });
-          const payload = await response.json();
-          if (payload.html) result.innerHTML = payload.html;
-          else result.textContent = payload.message || JSON.stringify(payload, null, 2);
-        } catch (error) {
-          result.textContent = `요청 실패: ${error.message}`;
-        }
-      });
-    </script>
+    <main id="main-content" class="shell">
+      <section class="status-card" aria-labelledby="status-heading">
+        <div class="section-heading compact-heading">
+          <div>
+            <p class="eyebrow">현재 연결 상태</p>
+            <h2 id="status-heading">검색 준비 상태</h2>
+          </div>
+          <button id="refresh-status" class="icon-button" type="button">새로고침</button>
+        </div>
+        <div id="service-status" class="status-grid" aria-live="polite">
+          <div><span>검색 엔진</span><strong>확인 중…</strong></div>
+          <div><span>법령 API</span><strong>확인 중…</strong></div>
+          <div><span>사용량</span><strong>확인 중…</strong></div>
+        </div>
+      </section>
+
+      <section class="search-card" aria-labelledby="search-heading">
+        <p class="eyebrow">SEARCH</p>
+        <h2 id="search-heading">무엇을 찾아볼까요?</h2>
+        <p class="helper-text">사건번호 또는 자연어 법률 질문을 입력하면 provider 원문과 검증된 상세 결과를 보여드려요.</p>
+        <form id="ask-form" novalidate>
+          <label for="query">검색 질문</label>
+          <div class="search-row">
+            <input id="query" name="query" maxlength="10000" autocomplete="off" placeholder="사건번호 또는 법률 질문을 입력하세요" aria-describedby="query-example" required>
+            <button id="search-button" class="primary-button" type="submit">검색</button>
+          </div>
+          <p id="query-example" class="field-hint">예: 임차보증금을 돌려받지 못했을 때</p>
+        </form>
+      </section>
+
+      <section id="search-status" class="search-status" aria-live="polite" aria-atomic="true">
+        <div class="status-line"><span id="status-dot" class="status-dot" aria-hidden="true"></span><strong id="status-message">질문을 입력해 주세요.</strong></div>
+        <div id="progress-panel" class="progress-panel" hidden>
+          <div class="progress-heading"><span id="progress-label">검색을 시작했습니다.</span><span id="progress-percent">0%</span></div>
+          <div class="progress-track" aria-hidden="true"><span id="progress-bar"></span></div>
+          <ul id="progress-steps" class="progress-steps">
+            <li data-progress-step="ANALYSIS_COMPLETE">질문 분석</li>
+            <li data-progress-step="LAW_EVIDENCE_UPDATED">관련 법령 확인</li>
+            <li data-progress-step="CANDIDATES_FOUND">판례 후보 검색</li>
+            <li data-progress-step="DETAIL_VERIFIED">판례 원문 검증</li>
+            <li data-progress-step="FINALIZING">결과 정리</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="result" class="result-container" aria-label="검색 결과">
+        <div class="empty-state"><h2>검색 결과</h2><p>검색을 시작하면 검증된 판례와 관련 법규가 여기에 표시됩니다.</p></div>
+      </section>
+    </main>
+
+    <footer class="site-footer shell">
+      <p>본 결과는 법제처 국가법령정보 Open API 데이터를 기반으로 하며, 법률 자문이 아닙니다.</p>
+      <p>원문 링크를 열어 실제 provider 자료를 함께 확인해 주세요.</p>
+    </footer>
+    <script type="module" src="/app.js"></script>
   </body>
 </html>

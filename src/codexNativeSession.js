@@ -46,11 +46,12 @@ const CODEX_CHILD_ENV_KEYS = Object.freeze([
   "CODEX_HOME",
 ]);
 
-export function buildCodexChildEnv(source = process.env, { legalMcpLogPath = "" } = {}) {
+export function buildCodexChildEnv(source = process.env, { legalMcpLogPath = "", codexHomePath = "" } = {}) {
   const env = {};
   for (const key of CODEX_CHILD_ENV_KEYS) {
     if (typeof source?.[key] === "string" && source[key]) env[key] = source[key];
   }
+  if (codexHomePath) env.CODEX_HOME = codexHomePath;
   if (legalMcpLogPath) env.LEGAL_MCP_LOG_PATH = legalMcpLogPath;
   return env;
 }
@@ -66,6 +67,17 @@ function safeDiagnostic(value) {
     .replace(/\s+/gu, " ")
     .trim()
     .slice(-2_000);
+}
+
+function nativeProcessError(stderr, fallbackCode, fallbackMessage) {
+  const authenticationFailure = /authenticat|unauthori[sz]ed|not logged in|sign[ -]?in|login|token/iu.test(stderr);
+  const code = authenticationFailure ? "CODEX_AUTH_REQUIRED" : fallbackCode;
+  const message = code === "CODEX_AUTH_REQUIRED"
+    ? "CODEX_AUTH_REQUIRED"
+    : `${code}:${fallbackMessage}:${safeDiagnostic(stderr)}`;
+  const error = new Error(message);
+  error.code = code;
+  return error;
 }
 
 function usageFromEvent(event) {
@@ -120,6 +132,7 @@ export function createCodexCliSessionFactory({
     const finalPath = path.join(sessionDir, "final.json");
     const proxyLogPath = path.join(sessionDir, "proxy.log");
     await fs.mkdir(workdir, { recursive: true });
+    await fs.mkdir(config.codexHomePath, { recursive: true });
     await fs.writeFile(schemaPath, `${JSON.stringify(FINAL_SCHEMA, null, 2)}\n`, "utf8");
     await fs.rm(finalPath, { force: true });
 
@@ -137,7 +150,10 @@ export function createCodexCliSessionFactory({
     const codexCommand = resolveCodexCommand();
     const child = spawn(codexCommand.command, [...codexCommand.prefixArgs, ...args], {
       cwd: workdir,
-      env: buildCodexChildEnv(process.env, { legalMcpLogPath: proxyLogPath }),
+      env: buildCodexChildEnv(process.env, {
+        legalMcpLogPath: proxyLogPath,
+        codexHomePath: config.codexHomePath,
+      }),
       windowsHide: true,
       shell: codexCommand.shell,
       stdio: ["pipe", "pipe", "pipe"],
@@ -222,8 +238,11 @@ export function createCodexCliSessionFactory({
     child.once("error", (error) => {
       clearTimeout(sessionTimer);
       ended = true;
-      closeResult = { code: null, signal: null, error: error.message };
-      for (const waiter of waiters.splice(0)) waiter(Promise.reject(error));
+      const classified = new Error(`CODEX_SPAWN_FAILED:${error.message}`);
+      classified.code = "CODEX_SPAWN_FAILED";
+      classified.cause = error;
+      closeResult = { code: null, signal: null, error: classified.message };
+      for (const waiter of waiters.splice(0)) waiter(Promise.reject(classified));
       resolveClose();
     });
     child.once("close", async (code, signal) => {
@@ -242,7 +261,13 @@ export function createCodexCliSessionFactory({
       clearTimeout(sessionTimer);
       ended = true;
       closeResult = { code, signal };
-        for (const waiter of waiters.splice(0)) waiter(timedOut ? Promise.reject(new Error("CODEX_NATIVE_SESSION_TIMEOUT")) : null);
+        if (timedOut) {
+          const timeoutError = new Error("CODEX_NATIVE_SESSION_TIMEOUT");
+          timeoutError.code = "CODEX_NATIVE_SESSION_TIMEOUT";
+          for (const waiter of waiters.splice(0)) waiter(Promise.reject(timeoutError));
+        } else {
+          for (const waiter of waiters.splice(0)) waiter(null);
+        }
       resolveClose();
     });
     child.stdin.end(prompt);
@@ -259,17 +284,24 @@ export function createCodexCliSessionFactory({
         if (!ended) return new Promise((resolve) => waiters.push(resolve));
         if (finalReturned) return null;
         finalReturned = true;
-        if (timedOut) throw new Error("CODEX_NATIVE_SESSION_TIMEOUT");
-        const finalText = await fs.readFile(finalPath, "utf8").catch(() => "");
-        if (!finalText) {
-          const processDiagnostic = closeResult?.code !== 0
-            ? `CODEX_NATIVE_PROCESS_FAILED:${closeResult?.code}:${safeDiagnostic(stderr)}`
-            : `CODEX_NATIVE_FINAL_MISSING:${safeDiagnostic(stderr)}`;
-          throw new Error(processDiagnostic);
+        if (timedOut) {
+          const timeoutError = new Error("CODEX_NATIVE_SESSION_TIMEOUT");
+          timeoutError.code = "CODEX_NATIVE_SESSION_TIMEOUT";
+          throw timeoutError;
         }
+        const finalText = await fs.readFile(finalPath, "utf8").catch(() => "");
+        if (!finalText) throw nativeProcessError(
+          stderr,
+          closeResult?.code !== 0 ? "CODEX_NATIVE_PROCESS_FAILED" : "CODEX_NATIVE_FINAL_MISSING",
+          closeResult?.code !== 0 ? String(closeResult?.code) : "final artifact missing",
+        );
         let selection;
         try { selection = JSON.parse(finalText); } catch (error) { throw new Error(`CODEX_NATIVE_FINAL_INVALID:${error.message}`); }
-        if (closeResult?.code !== 0) throw new Error(`CODEX_NATIVE_PROCESS_FAILED:${closeResult?.code}:${safeDiagnostic(stderr)}`);
+        if (closeResult?.code !== 0) throw nativeProcessError(
+          stderr,
+          "CODEX_NATIVE_PROCESS_FAILED",
+          String(closeResult?.code),
+        );
         return { type: "final", selection, usage: lastUsage, elapsedMs: 0, session_id: [...sessionIds][0] || null };
       },
       async close() {
