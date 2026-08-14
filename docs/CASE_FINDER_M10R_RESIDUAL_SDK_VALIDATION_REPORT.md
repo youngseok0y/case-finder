@@ -1,7 +1,7 @@
 # M10-R Residual SDK Validation
 
 Base SHA: `e846c75`
-Final SHA: pending validation commit
+Final SHA: `1a1d545` (validation implementation commit)
 Branch: `codex/m10r-codex-sdk`
 
 ## A. User config isolation
