@@ -3,7 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import { buildCodexChildEnv } from "../src/codexNativeSession.js";
 import { resolveCodexCommand } from "../src/codexResolver.js";
-import { closeStaleTransport } from "../src/mcpClient.js";
+import { buildMcpServerParameters, closeStaleTransport } from "../src/mcpClient.js";
 import { buildLegalMcpEnv } from "../src/runtimeEnv.js";
 import { resolveRuntimePaths } from "../src/runtimePaths.js";
 
@@ -181,6 +181,28 @@ test("restricted legal MCP upstream environment forwards only LAW_OC", () => {
   assert.equal(env.GEMINI_API_KEY, undefined);
   assert.equal(env.GOOGLE_APPLICATION_CREDENTIALS, undefined);
   assert.equal(env.CASE_FINDER_SKIP_DOTENV, undefined);
+});
+
+test("managed MCP uses the private Node executable instead of a system-node .cmd shim", () => {
+  const rootDir = "C:\\Case Finder\\app";
+  const managedNodePath = "C:\\Case Finder\\runtime\\node\\node.exe";
+  const upstreamEntry = `${rootDir}\\node_modules\\korean-law-mcp\\build\\index.js`;
+  const result = buildMcpServerParameters({
+    platform: "win32",
+    source: { ComSpec: "C:\\Windows\\System32\\cmd.exe", PATH: "C:\\Windows\\System32" },
+    rootDir,
+    runtimePaths: { managedNodePath },
+    lawOc: "test-law",
+    fsImpl: {
+      existsSync(value) {
+        return value === managedNodePath || value === upstreamEntry;
+      },
+    },
+  });
+  assert.equal(result.mode, "managed-node");
+  assert.equal(result.command, managedNodePath);
+  assert.deepEqual(result.args, [upstreamEntry]);
+  assert.equal(result.env.LAW_OC, "test-law");
 });
 
 test("MCP stale transport cleanup closes the old handle", async () => {

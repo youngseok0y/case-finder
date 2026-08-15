@@ -1,18 +1,31 @@
 {
-  "version": "m10r-codex-sdk-v1",
+  "version": "m11b-private-node-v1",
   "installer_entrypoint": "CaseFinderSetup.exe",
   "install_root": "%LOCALAPPDATA%\\Fable\\CaseFinder",
   "layout": {
     "app": "app",
     "node": "runtime/node/node.exe",
+    "codex": "runtime/codex",
     "node_modules": "app/node_modules",
     "logs": "logs"
   },
   "runtime": {
     "node": {
+      "managed": true,
       "version": "24.14.0",
       "path": "runtime/node/node.exe",
       "range": ">=24.14.0 <25"
+    },
+    "codex": {
+      "managed": true,
+      "release": "0.147.0",
+      "target": "x86_64-pc-windows-msvc",
+      "path": "runtime/codex",
+      "required_files": [
+        "runtime/codex/bin/codex.exe",
+        "runtime/codex/bin/codex-code-mode-host.exe",
+        "runtime/codex/codex-resources/"
+      ]
     },
     "codex_sdk": {
       "release": "0.147.0",
@@ -20,7 +33,7 @@
       "codex_package": "@openai/codex",
       "platform_package": "@openai/codex-win32-x64",
       "target": "x86_64-pc-windows-msvc",
-      "runtime_check": "src/lunaSdkRuntime.js inspectPackagedCodexRuntime"
+      "runtime_check": "app/src/lunaSdkRuntime.js inspectPackagedCodexRuntime"
     },
     "server": "app/src/server.js",
     "bind": "127.0.0.1",
@@ -36,6 +49,7 @@
     "app/package.json",
     "app/package-lock.json",
     "runtime/node/node.exe",
+    "runtime/codex/",
     ".env.example",
     "start.bat"
   ],
@@ -51,20 +65,29 @@
     "coverage/",
     "dist/",
     "release/",
-    "*.exe",
     "*.zip"
   ],
   "runtime_dependencies": [
     "@google/genai",
     "@modelcontextprotocol/sdk",
     "@openai/codex-sdk",
+    "@openai/codex-win32-x64",
     "dotenv",
     "korean-law-mcp"
   ],
+  "packaging": {
+    "milestone": "M11-B_NODE_RUNTIME_PACKAGING_FEASIBILITY",
+    "decision": "B1_PRIVATE_NODE_ADOPT",
+    "m11a_prune": "scripts/m11a/prune-staging.mjs",
+    "runtime_npm_ci": false,
+    "b2": "REJECT: no material benefit after externalizing runtime-sensitive packages",
+    "b3": "REJECT: SEA process.execPath re-enters embedded main for child JavaScript",
+    "mutable_paths": [".env", "logs/", "state/"]
+  },
   "notes": [
-    "The installer provisions the private Node runtime and the pinned Codex SDK plus platform package under app/node_modules/.",
+    "The installer provisions private Node 24.14.0, managed Codex runtime files, and the pinned SDK/platform package during packaging.",
     "Final execution uses runtime/node/node.exe and never runs npm ci; dependencies are installed during packaging.",
     "luna_native uses the SDK packaged runtime and preserves the user's existing Codex authentication source without copying auth files.",
-    "The normal product path does not use CODEX_CLI_PATH, system PATH, WindowsApps discovery, or manual Codex binary placement."
+    "The product path does not require system Node/npm or system Codex CLI; managed MCP child processes use the private Node executable."
   ]
 }
