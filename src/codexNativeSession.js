@@ -5,6 +5,7 @@ import { config, ROOT_DIR } from "../config.js";
 import { resolveCodexCommand } from "./codexResolver.js";
 import { CODEX_FINAL_SCHEMA } from "./codexFinalSchema.js";
 import { buildCodexChildEnv } from "./codexEnv.js";
+import { isCodexAuthFailure } from "./codexAuth.js";
 
 const FORBIDDEN_EVENT_TYPES = /(command_execution|shell|computer|file_search|web_search|browser|repo|git|github)/iu;
 
@@ -24,7 +25,7 @@ function safeDiagnostic(value) {
 }
 
 function nativeProcessError(stderr, fallbackCode, fallbackMessage) {
-  const authenticationFailure = /authenticat|unauthori[sz]ed|not logged in|sign[ -]?in|login|token/iu.test(stderr);
+  const authenticationFailure = isCodexAuthFailure(stderr);
   const code = authenticationFailure ? "CODEX_AUTH_REQUIRED" : fallbackCode;
   const message = code === "CODEX_AUTH_REQUIRED"
     ? "CODEX_AUTH_REQUIRED"

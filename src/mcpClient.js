@@ -13,7 +13,7 @@ let lastToolNames = [];
 function serverParameters() {
   const binPath = process.platform === "win32" ? `${config.mcpBinPath}.cmd` : config.mcpBinPath;
   if (!fs.existsSync(binPath)) {
-    throw new Error(`korean-law-mcp 실행 파일이 없습니다: ${path.relative(ROOT_DIR, binPath)}`);
+    throw new Error(`korean-law-mcp executable is missing: ${path.relative(ROOT_DIR, binPath)}`);
   }
 
   const env = { ...process.env, LAW_OC: config.lawOc };
@@ -27,13 +27,46 @@ function serverParameters() {
   return { command: binPath, args: [], env };
 }
 
-function timeout(promise, timeoutMs) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(`MCP 호출 시간 초과(${timeoutMs}ms)`)), timeoutMs);
-    }),
-  ]);
+export const MCP_CALL_TIMEOUT = "MCP_CALL_TIMEOUT";
+
+export function withMcpTimeout(promise, timeoutMs) {
+  let timer = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(`MCP call timed out after ${timeoutMs}ms`);
+      error.code = MCP_CALL_TIMEOUT;
+      reject(error);
+    }, timeoutMs);
+    timer.unref?.();
+  });
+  return Promise.race([Promise.resolve(promise), timeoutPromise]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+export function isMcpTransportFailure(error) {
+  const code = String(error?.code || "").toUpperCase();
+  if (code === MCP_CALL_TIMEOUT) return false;
+  if (/^(?:MCP_TRANSPORT|MCP_CONNECTION|ERR_STREAM|ECONNRESET|EPIPE|ERR_IPC_CHANNEL_CLOSED)/u.test(code)) return true;
+  return /(?:transport|connection|disconnected|broken pipe|premature close|channel closed)/iu.test(String(error?.message || ""));
+}
+
+export async function runMcpCall({
+  call,
+  timeoutMs,
+  closeTransport = async () => {},
+  reconnect = async () => {},
+  beforeRetry = async () => {},
+} = {}) {
+  try {
+    return await withMcpTimeout(Promise.resolve().then(call), timeoutMs);
+  } catch (error) {
+    if (error?.code === MCP_CALL_TIMEOUT || !isMcpTransportFailure(error)) throw error;
+    await beforeRetry(error);
+    await closeTransport();
+    await reconnect();
+    return withMcpTimeout(Promise.resolve().then(call), timeoutMs);
+  }
 }
 
 export async function closeStaleTransport(staleTransport, onError = () => {}) {
@@ -54,14 +87,14 @@ async function connectOnce() {
   );
 
   nextTransport.onerror = (error) => {
-    void logError("korean-law-mcp 프로세스 오류", error);
+    void logError("korean-law-mcp process error", error);
   };
   nextTransport.onclose = () => {
     if (transport === nextTransport) {
       client = null;
       transport = null;
     }
-    logInfo("korean-law-mcp 연결이 종료됐습니다.");
+    logInfo("korean-law-mcp connection closed.");
   };
 
   await nextClient.connect(nextTransport);
@@ -69,7 +102,7 @@ async function connectOnce() {
   lastToolNames = (listed.tools || []).map((tool) => tool.name);
   client = nextClient;
   transport = nextTransport;
-  logInfo(`korean-law-mcp 연결 완료 (${lastToolNames.length}개 도구)`);
+  logInfo(`korean-law-mcp connected (${lastToolNames.length} tools)`);
 }
 
 export async function startMcp({ probe = false } = {}) {
@@ -85,31 +118,39 @@ export async function startMcp({ probe = false } = {}) {
     const result = await callTool("search_law", { query: config.mcpProbeQuery, display: 1 });
     const text = result.content?.find((item) => item.type === "text")?.text || "";
     if (result.isError || !text || text.includes("[NOT_FOUND]")) {
-      throw new Error("M0 MCP 검색 확인 실패");
+      throw new Error("M0 MCP probe failed");
     }
-    logInfo(`M0 MCP 검색 성공: search_law(\"${config.mcpProbeQuery}\")`);
+    logInfo(`M0 MCP probe passed: search_law("${config.mcpProbeQuery}")`);
   } else if (probe) {
-    logInfo("M0 MCP 검색 확인을 건너뛰었습니다: LAW_OC가 설정되지 않았습니다.");
+    logInfo("M0 MCP probe skipped because LAW_OC is not configured.");
   }
 }
 
+async function invalidateMcpTransport() {
+  const staleTransport = transport;
+  client = null;
+  transport = null;
+  await closeStaleTransport(staleTransport, (closeError) => {
+    void logError("stale korean-law-mcp connection cleanup failed", closeError);
+  });
+}
+
 export async function callTool(name, args = {}, timeoutMs = config.mcpTimeoutMs) {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      await startMcp();
-      return await timeout(client.callTool({ name, arguments: args }), timeoutMs);
-    } catch (error) {
-      const staleTransport = transport;
-      client = null;
-      transport = null;
-      await closeStaleTransport(staleTransport, (closeError) => {
-        void logError("오래된 korean-law-mcp 연결 정리 실패", closeError);
-      });
-      if (attempt === 1) throw error;
-      await logError(`MCP 호출 실패 후 재기동합니다: ${name}`, error);
-    }
-  }
-  throw new Error("MCP 호출 실패");
+  await startMcp();
+  return runMcpCall({
+    timeoutMs,
+    call: () => {
+      if (!client) {
+        const error = new Error("MCP transport is unavailable");
+        error.code = "MCP_TRANSPORT_UNAVAILABLE";
+        throw error;
+      }
+      return client.callTool({ name, arguments: args });
+    },
+    beforeRetry: (error) => logError(`MCP call failed; reconnecting once: ${name}`, error),
+    closeTransport: invalidateMcpTransport,
+    reconnect: startMcp,
+  });
 }
 
 export function getMcpStatus() {
@@ -120,10 +161,5 @@ export function getMcpStatus() {
 }
 
 export async function closeMcp() {
-  const staleTransport = transport;
-  client = null;
-  transport = null;
-  await closeStaleTransport(staleTransport, (error) => {
-    void logError("korean-law-mcp 연결 종료 실패", error);
-  });
+  await invalidateMcpTransport();
 }

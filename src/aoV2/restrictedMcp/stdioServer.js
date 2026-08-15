@@ -26,6 +26,7 @@ const { LEGAL_TOOL_NAMES, createLegalToolGateway } = await import("../legalToolG
 const { createEvidenceLedger } = await import("../evidenceLedger.js");
 const { createSafetyController } = await import("../safety.js");
 const { createTelemetry } = await import("../telemetry.js");
+const { createRestrictedToolHandler } = await import("./requestHandler.js");
 
 const allowedTools = new Set(LEGAL_TOOL_NAMES);
 const ledger = createEvidenceLedger({ provider: "codex_luna_stdio" });
@@ -46,21 +47,20 @@ const missingTools = [...allowedTools].filter((name) => !upstreamTools.some((too
 if (missingTools.length) throw new Error(`RESTRICTED_MCP_TOOL_MISSING:${missingTools.join(",")}`);
 const toolDefinitions = upstreamTools.filter((tool) => allowedTools.has(tool.name));
 const logPath = process.env.LEGAL_MCP_LOG_PATH || "";
-let latestRawResult = null;
 
 async function diagnostic(value) {
   if (!logPath) return;
   await fs.appendFile(logPath, `${JSON.stringify(value)}\n`).catch(() => {});
 }
 
-const gateway = createLegalToolGateway({
+const handleTool = createRestrictedToolHandler({
+  allowedTools,
+  upstream,
   ledger,
   telemetry,
   safety,
-  callTool: async (name, args) => {
-    latestRawResult = await upstream.callTool({ name, arguments: args });
-    return latestRawResult;
-  },
+  diagnostic,
+  createGateway: createLegalToolGateway,
 });
 const server = new Server(
   { name: "case-finder-restricted-legal-mcp", version: "0.1.0" },
@@ -69,13 +69,7 @@ const server = new Server(
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolDefinitions }));
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const name = request.params.name;
-  if (!allowedTools.has(name)) throw new Error(`RESTRICTED_MCP_TOOL_DENIED:${name}`);
-  const args = request.params.arguments || {};
-  latestRawResult = null;
-  const result = await gateway.execute(name, args);
-  await diagnostic({ event: "tool", name, trace: gateway.snapshotTrace().at(-1) || null });
-  return latestRawResult || { isError: Boolean(result?.isError), content: [{ type: "text", text: JSON.stringify(result) }] };
+  return handleTool({ name: request.params.name, args: request.params.arguments || {} });
 });
 
 await server.connect(new StdioServerTransport());

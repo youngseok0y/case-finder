@@ -25,7 +25,7 @@ export function createSearchAdapterRegistry({ adapters = {} } = {}) {
     ids() {
       return [...SEARCH_ADAPTER_IDS];
     },
-    resolve(adapterId = process.env.SEARCH_ADAPTER || "gemini_d") {
+    resolve(adapterId) {
       const adapter = entries.get(adapterId);
       if (!adapter || typeof adapter.runNaturalQuery !== "function") throw new SearchAdapterUnsupportedError(adapterId);
       return adapter;

@@ -1,9 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Codex } from "@openai/codex-sdk";
 import { config, ROOT_DIR } from "../config.js";
 import { buildCodexChildEnv } from "./codexEnv.js";
 import { CODEX_FINAL_SCHEMA } from "./codexFinalSchema.js";
+import { isCodexAuthFailure } from "./codexAuth.js";
 
 const SDK_MCP_SERVER_NAME = "korean_law";
 const SDK_MCP_STARTUP_TIMEOUT_SEC = 120;
@@ -40,7 +42,7 @@ function sdkError(code, message, cause = null) {
 }
 
 function isAuthFailure(error) {
-  return /authenticat|unauthori[sz]ed|not logged in|sign[ -]?in|login|token/iu.test(String(error?.message || ""));
+  return isCodexAuthFailure(error);
 }
 
 function createSessionDirectory(baseDir, index) {
@@ -129,7 +131,7 @@ export async function inspectPackagedCodexRuntime({
   } catch (error) {
     throw sdkError("CODEX_SDK_RUNTIME_UNAVAILABLE", "packaged Codex platform dependency is missing", error);
   }
-  const packageRoot = path.dirname(new URL(packageJsonPath).pathname).replace(/^\/(\w):/u, "$1:");
+  const packageRoot = path.dirname(fileURLToPath(packageJsonPath));
   const vendorRoot = path.join(packageRoot, "vendor", target.triple);
   const executablePath = path.join(vendorRoot, "bin", target.binary);
   const hostPath = path.join(vendorRoot, "bin", target.host);

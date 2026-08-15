@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { config, EXPECTED_NODE_VERSION, ROOT_DIR } from "../config.js";
 import { readGeminiUsage } from "./rateLimiter.js";
 import { closeMcp, getMcpStatus, startMcp } from "./mcpClient.js";
@@ -23,6 +24,16 @@ import {
 
 const publicRoot = path.join(ROOT_DIR, "public");
 const maxBodyBytes = 10_000;
+const REQUEST_BODY_TOO_LARGE = "REQUEST_BODY_TOO_LARGE";
+const MALFORMED_JSON = "MALFORMED_JSON";
+
+class HttpRequestError extends Error {
+  constructor(code, status, message) {
+    super(message);
+    this.code = code;
+    this.status = status;
+  }
+}
 const PUBLIC_ASSETS = Object.freeze({
   "/": ["index.html", "text/html; charset=utf-8"],
   "/index.html": ["index.html", "text/html; charset=utf-8"],
@@ -48,7 +59,7 @@ function sendSse(response, event, payload) {
   response.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
 }
 
-async function readBody(request) {
+async function legacyReadBody(request) {
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
@@ -57,6 +68,34 @@ async function readBody(request) {
     chunks.push(chunk);
   }
   return Buffer.concat(chunks).toString("utf8");
+}
+
+async function readBody(request) {
+  const declaredLength = Number(request.headers["content-length"]);
+  if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) {
+    request.resume();
+    throw new HttpRequestError(REQUEST_BODY_TOO_LARGE, 413, "Request body is too large.");
+  }
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > maxBodyBytes) {
+      request.resume();
+      throw new HttpRequestError(REQUEST_BODY_TOO_LARGE, 413, "Request body is too large.");
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function parseJsonBody(request) {
+  const raw = await readBody(request);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new HttpRequestError(MALFORMED_JSON, 400, "Request body must be valid JSON.");
+  }
 }
 
 function adapterLabel(adapter) {
@@ -227,12 +266,39 @@ function errorPayload(error) {
   return { status: 500, payload: { ok: false, terminalState: "NETWORK_SERVER_ERROR", message: "검색 처리 중 오류가 발생했습니다." } };
 }
 
-function sameOrigin(request) {
+function requestLocalPort(request) {
+  return Number(request.socket?.localPort || config.port);
+}
+
+function adminValidationMessage(error) {
+  const message = String(error?.message || "");
+  const field = message.match(/^ADMIN_(?:SETTING_INVALID|SECRET_EMPTY):([A-Z][A-Z0-9_]*)$/u)?.[1];
+  return field ? `ADMIN_SETTING_INVALID:${field}` : "ADMIN_SETTINGS_INVALID";
+}
+
+export function isTrustedLocalHost(request) {
+  const host = request.headers.host;
+  if (!host) return false;
+  try {
+    const parsed = new URL(`http://${host}`);
+    const hostname = parsed.hostname.toLowerCase();
+    if (!new Set(["127.0.0.1", "localhost"]).has(hostname)) return false;
+    return Number(parsed.port || 80) === requestLocalPort(request);
+  } catch {
+    return false;
+  }
+}
+
+export function sameOrigin(request) {
+  if (!isTrustedLocalHost(request)) return false;
   const origin = request.headers.origin;
   if (!origin) return true;
   try {
-    const expected = new URL(`http://${request.headers.host || "127.0.0.1"}`).origin;
-    return new URL(origin).origin === expected;
+    const parsed = new URL(origin);
+    const hostname = parsed.hostname.toLowerCase();
+    return parsed.protocol === "http:"
+      && new Set(["127.0.0.1", "localhost"]).has(hostname)
+      && Number(parsed.port || 80) === requestLocalPort(request);
   } catch {
     return false;
   }
@@ -248,8 +314,8 @@ async function serveAsset(urlPath, response) {
   return true;
 }
 
-async function handleAsk(request, response, stream = false) {
-  const body = JSON.parse(await readBody(request));
+async function handleAsk(request, response, stream = false, executeQueryImpl = executeQuery) {
+  const body = await parseJsonBody(request);
   const query = typeof body.query === "string" ? body.query.trim() : "";
   if (!query) {
     sendJson(response, 400, { ok: false, terminalState: "SEARCH_FAILED", message: "질문을 입력해 주세요." });
@@ -266,7 +332,7 @@ async function handleAsk(request, response, stream = false) {
   }
 
   try {
-    const result = await executeQuery(query, (event) => {
+    const result = await executeQueryImpl(query, (event) => {
       if (stream) sendSse(response, event.event, event);
     });
     if (stream) {
@@ -287,20 +353,34 @@ async function handleAsk(request, response, stream = false) {
   }
 }
 
-const server = http.createServer((request, response) => {
+const isMainModule = process.argv[1]
+  && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+
+export function createRequestHandler({
+  executeQueryImpl = executeQuery,
+  healthPayloadImpl = healthPayload,
+  adminSettingsViewImpl = adminSettingsView,
+  validateAdminPatchImpl = validateAdminPatch,
+  writeAdminSettingsImpl = writeAdminSettings,
+} = {}) {
+  return (request, response) => {
   void (async () => {
-    const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
+    if (!isTrustedLocalHost(request)) {
+      sendJson(response, 403, { ok: false, message: "Untrusted local Host header." });
+      return;
+    }
+    const url = new URL(request.url, `http://${request.headers.host}`);
     if (request.method === "GET" && (await serveAsset(url.pathname, response))) return;
     if (request.method === "GET" && url.pathname === "/health") {
-      sendJson(response, 200, await healthPayload());
+      sendJson(response, 200, await healthPayloadImpl());
       return;
     }
     if (request.method === "GET" && url.pathname === "/status") {
-      sendJson(response, 200, await healthPayload());
+      sendJson(response, 200, await healthPayloadImpl());
       return;
     }
     if (request.method === "GET" && url.pathname === "/admin/config") {
-      sendJson(response, 200, { ok: true, ...adminSettingsView() });
+      sendJson(response, 200, { ok: true, ...adminSettingsViewImpl() });
       return;
     }
     if (request.method === "POST" && url.pathname === "/admin/config") {
@@ -308,8 +388,15 @@ const server = http.createServer((request, response) => {
         sendJson(response, 403, { ok: false, message: "관리자 설정은 같은 출처에서만 저장할 수 있습니다." });
         return;
       }
-      const patch = validateAdminPatch(JSON.parse(await readBody(request)));
-      const writtenFields = await writeAdminSettings(patch);
+      let patch;
+      try {
+        patch = validateAdminPatchImpl(await parseJsonBody(request));
+      } catch (error) {
+        if (error?.code === MALFORMED_JSON || error?.code === REQUEST_BODY_TOO_LARGE) throw error;
+        sendJson(response, 400, { ok: false, message: adminValidationMessage(error) });
+        return;
+      }
+      const writtenFields = await writeAdminSettingsImpl(patch);
       sendJson(response, 200, {
         ok: true,
         writtenFields,
@@ -319,24 +406,44 @@ const server = http.createServer((request, response) => {
       return;
     }
     if (request.method === "POST" && url.pathname === "/ask") {
-      await handleAsk(request, response, false);
+      if (!sameOrigin(request)) {
+        sendJson(response, 403, { ok: false, message: "Untrusted local Origin header." });
+        return;
+      }
+      await handleAsk(request, response, false, executeQueryImpl);
       return;
     }
     if (request.method === "POST" && url.pathname === "/ask/stream") {
-      await handleAsk(request, response, true);
+      if (!sameOrigin(request)) {
+        sendJson(response, 403, { ok: false, message: "Untrusted local Origin header." });
+        return;
+      }
+      await handleAsk(request, response, true, executeQueryImpl);
       return;
     }
     sendJson(response, 404, { ok: false, message: "Not Found" });
   })().catch(async (error) => {
+    if (!response.headersSent && Number.isInteger(error?.status)) {
+      sendJson(response, error.status, {
+        ok: false,
+        terminalState: "SEARCH_FAILED",
+        message: error.message,
+      });
+      return;
+    }
     await logError("HTTP 요청 처리 실패", error);
     if (!response.headersSent) sendJson(response, 500, { ok: false, terminalState: "NETWORK_SERVER_ERROR", message: "검색 처리 중 오류가 발생했습니다." });
   });
-});
+  };
+}
+
+const server = http.createServer(createRequestHandler());
 
 server.on("error", (error) => {
   void logError("HTTP 서버 오류", error);
 });
 
+if (isMainModule) {
 process.on("SIGINT", () => {
   server.close(async () => {
     await closeMcp();
@@ -360,5 +467,7 @@ try {
 server.listen(config.port, "127.0.0.1", () => {
   logInfo(`http://localhost:${config.port} 에서 실행 중입니다.`);
 });
+
+}
 
 export { executeQuery, healthPayload };
