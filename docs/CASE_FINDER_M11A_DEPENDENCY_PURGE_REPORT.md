@@ -128,9 +128,9 @@ Executed against the final A1 staging copy with provider values passed in memory
 |---|---|
 | Direct `99두2963` | `DIRECT`, HTTP 200, `SUCCESS`, 1 verified item |
 | Gemini natural `계약 해지 손해배상` | `GEMINI_D`, HTTP 200, `SUCCESS`, 2 items, fallback label absent |
-| Luna natural `계약 해지 손해배상` | HTTP 503, `LUNA_RUNTIME_UNAVAILABLE` |
+| Luna natural `계약 해지 손해배상` | `LUNA_NATIVE`, HTTP 200, `NO_RESULT`, 0 items, fallback label absent |
 
-The Luna result is an external Codex/Luna runtime or authentication blocker. It is separate from the successful packaged-runtime gate, restricted MCP/listTools gate, A0/A1 legal parity, and the absence of silent Gemini fallback. A successful authenticated Luna natural turn remains owner-side follow-up evidence.
+The Luna smoke was rerun in the real user's Windows context after the sandbox-only Codex temp-directory permission failure was isolated. The authenticated native path completed with HTTP 200 and an honest `NO_RESULT`; no Gemini fallback occurred. This confirms the packaged/runtime and authentication path, but it is not a positive-hit or search-quality claim.
 
 ## 10. Frozen invariants
 
@@ -149,7 +149,7 @@ The following remained frozen throughout M11-A:
 
 **`PURGE_ADOPT` for the M11-A deployable four-tool/runtime scope.**
 
-The selective A1 staging purge removed the isolated optional ML/native/document subtrees and achieved a 47.88% node_modules reduction while preserving startup/listTools, the four legal search/detail contracts, observed-ID detail verification, packaged Codex runtime, Gemini product smoke, and the full 76-test regression suite.
+The selective A1 staging purge removed the isolated optional ML/native/document subtrees and achieved a 47.88% node_modules reduction while preserving startup/listTools, the four legal search/detail contracts, observed-ID detail verification, packaged Codex runtime, Gemini and Luna product smoke without silent fallback, and the full 76-test regression suite.
 
 This decision adopts staging-copy pruning only. It does not authorize changing `package.json`/`package-lock.json`, globally omitting optional dependencies, forking `korean-law-mcp`/`kordoc`, or claiming non-production `kordoc` document/OCR/annex/render features are supported after purge.
 
@@ -162,6 +162,6 @@ M11-B should consume:
 3. the protected package list and the root-direct `pdfjs-dist` exception above;
 4. the final A1 footprint of 622.63 MiB for the measured `node_modules` staging tree;
 5. a clean installer/package assembly test on the intended deployment artifact, including a second clean Windows environment if available;
-6. an authenticated Luna natural smoke, or an explicit external blocker record, before claiming end-to-end Luna product readiness.
+6. the authenticated Luna natural smoke recorded above (`HTTP 200`, `NO_RESULT`, no fallback); this is runtime/readiness evidence, not a search-quality result.
 
 M11-B must re-check whether annex/document/OCR tooling is in the actual deployable scope. If it is, this M11-A decision must be narrowed or reverted for those paths rather than silently restoring or changing the dependency contract.
