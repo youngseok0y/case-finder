@@ -10,21 +10,42 @@ let transport = null;
 let startPromise = null;
 let lastToolNames = [];
 
-function serverParameters() {
-  const binPath = process.platform === "win32" ? `${config.mcpBinPath}.cmd` : config.mcpBinPath;
-  if (!fs.existsSync(binPath)) {
-    throw new Error(`korean-law-mcp executable is missing: ${path.relative(ROOT_DIR, binPath)}`);
-  }
-
-  const env = { ...process.env, LAW_OC: config.lawOc };
-  if (process.platform === "win32") {
+export function buildMcpServerParameters({
+  platform = process.platform,
+  source = process.env,
+  fsImpl = fs,
+  rootDir = ROOT_DIR,
+  runtimePaths = config.runtimePaths,
+  lawOc = config.lawOc,
+} = {}) {
+  const env = { ...source, LAW_OC: lawOc };
+  const upstreamEntry = path.join(rootDir, "node_modules", "korean-law-mcp", "build", "index.js");
+  const managedNodePath = runtimePaths?.managedNodePath || "";
+  if (platform === "win32" && managedNodePath && fsImpl.existsSync(managedNodePath) && fsImpl.existsSync(upstreamEntry)) {
     return {
-      command: process.env.ComSpec || "cmd.exe",
-      args: ["/d", "/s", "/c", binPath],
+      command: managedNodePath,
+      args: [upstreamEntry],
       env,
+      mode: "managed-node",
     };
   }
-  return { command: binPath, args: [], env };
+
+  const binPath = platform === "win32"
+    ? path.join(rootDir, "node_modules", ".bin", "korean-law-mcp.cmd")
+    : path.join(rootDir, "node_modules", ".bin", "korean-law-mcp");
+  if (!fsImpl.existsSync(binPath)) {
+    throw new Error(`korean-law-mcp executable is missing: ${path.relative(rootDir, binPath)}`);
+  }
+
+  if (platform === "win32") {
+    return {
+      command: source.ComSpec || "cmd.exe",
+      args: ["/d", "/s", "/c", binPath],
+      env,
+      mode: "npm-bin",
+    };
+  }
+  return { command: binPath, args: [], env, mode: "npm-bin" };
 }
 
 export const MCP_CALL_TIMEOUT = "MCP_CALL_TIMEOUT";
@@ -79,7 +100,7 @@ export async function closeStaleTransport(staleTransport, onError = () => {}) {
 }
 
 async function connectOnce() {
-  const params = serverParameters();
+  const params = buildMcpServerParameters();
   const nextTransport = new StdioClientTransport(params);
   const nextClient = new Client(
     { name: "fable-case-finder", version: "0.1.0" },
