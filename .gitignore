@@ -1,10 +1,8 @@
 node_modules/
 .env
 npm-debug.log*
-state/*
-!state/.gitkeep
-logs/*
-!logs/.gitkeep
+logs/
+state/
 test/private/
 dist/
 build/
