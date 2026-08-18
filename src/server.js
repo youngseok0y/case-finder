@@ -196,7 +196,7 @@ async function executeQuery(query, onProgress = () => {}) {
   const progress = createProgressReporter(onProgress);
   progress.emit("SEARCH_STARTED");
   const route = routeQuery(query, config.caseNumberMax);
-  progress.emit("ROUTE_IDENTIFIED", { route: route.kind });
+  progress.emit("ROUTE_IDENTIFIED", { route: route.kind, ...route.telemetry });
 
   if (route.kind === "direct") {
     const lookedUp = await lookupDirect(query, route);

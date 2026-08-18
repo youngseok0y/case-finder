@@ -55,6 +55,10 @@ function safeRoute(value) {
   return value === "direct" || value === "natural" ? value : "";
 }
 
+function safeText(value) {
+  return typeof value === "string" && value.length <= 120 ? value : null;
+}
+
 export function createProgressReporter(onProgress = () => {}) {
   let lastRank = -1;
   let last = null;
@@ -69,6 +73,11 @@ export function createProgressReporter(onProgress = () => {}) {
       label: EVENT_LABEL[event],
       percent: EVENT_PERCENT[event],
       route: safeRoute(details.route),
+      route_reason: safeText(details.route_reason),
+      candidate_raw: safeText(details.candidate_raw),
+      candidate_normalized: safeText(details.candidate_normalized),
+      candidate_case_code: safeText(details.candidate_case_code),
+      candidate_rejection_reason: safeText(details.candidate_rejection_reason),
       candidateCount: count(details.candidateCount),
       verifiedCount: count(details.verifiedCount),
       lawCount: count(details.lawCount),
