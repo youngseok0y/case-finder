@@ -4,6 +4,7 @@ import { caseNumberIncludes, normalizeCaseNumber } from "./router.js";
 
 const DETAIL_SECTIONS = ["판시사항", "판결요지", "결정요지", "재결주문", "재결요지", "참조조문", "참조판례", "이유", "전문"];
 const ARTICLE_PATTERN = /(?:제)?\d+조(?:의\d+)?(?:제\d+항)?(?:제\d+호)?/g;
+const LAW_NAME_PATTERN = /([가-힣][가-힣0-9·()「」ㆍ\s]{0,79}(?:시행규칙|시행령|법률|헌법|규칙|법))\s*$/u;
 
 export function toolText(result) {
   return result?.content?.find((item) => item.type === "text")?.text || "";
@@ -169,10 +170,26 @@ export function parseLawSearchResults(rawText) {
   return results;
 }
 
-export function lawDetailLink(mst) {
-  return /^\d+$/.test(String(mst || ""))
-    ? `https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=${encodeURIComponent(mst)}`
-    : "";
+export function articleToJoNo(article) {
+  const match = String(article || "").trim().match(/^(?:제)?(\d{1,4})조(?:의(\d{1,2}))?/u);
+  if (!match) return "";
+  const articleNumber = Number.parseInt(match[1], 10);
+  const branchNumber = match[2] ? Number.parseInt(match[2], 10) : 0;
+  if (!Number.isInteger(articleNumber) || articleNumber < 1 || articleNumber > 9_999) return "";
+  if (!Number.isInteger(branchNumber) || branchNumber < 0 || branchNumber > 99) return "";
+  return `${String(articleNumber).padStart(4, "0")}${String(branchNumber).padStart(2, "0")}`;
+}
+
+export function lawDetailLink(mst, article = "") {
+  if (!/^\d+$/.test(String(mst || ""))) return "";
+  const link = new URL("https://www.law.go.kr/LSW/lsInfoP.do");
+  link.searchParams.set("lsiSeq", String(mst));
+  const joNo = articleToJoNo(article);
+  if (joNo) {
+    link.searchParams.set("docType", "JO");
+    link.searchParams.set("joNo", joNo);
+  }
+  return link.toString();
 }
 
 function lawSearchItems(result) {
@@ -199,11 +216,13 @@ function cleanLawArticleText(rawText) {
 export function parseStatuteReferences(referenceText) {
   const references = [];
   const seen = new Set();
-  for (const clause of cleanText(referenceText).split(/\s*\/\s*/)) {
+  let currentLaw = "";
+  for (const clause of cleanText(referenceText).split(/\s*[,;\/\n]+\s*/u)) {
     const articleIndex = clause.search(/(?:제)?\d+조/);
     if (articleIndex < 0) continue;
-    const lawMatch = clause.slice(0, articleIndex).match(/([가-힣][가-힣0-9·()「」ㆍ\s]{0,39}법)\s*$/);
-    const lawName = lawMatch?.[1]?.replace(/^\[\d+\]\s*/, "").trim();
+    const lawMatch = clause.slice(0, articleIndex).match(LAW_NAME_PATTERN);
+    if (lawMatch?.[1]) currentLaw = lawMatch[1].replace(/^\[\d+\]\s*/, "").trim();
+    const lawName = currentLaw;
     if (!lawName) continue;
     for (const articleMatch of clause.slice(articleIndex).matchAll(ARTICLE_PATTERN)) {
       const article = articleMatch[0].startsWith("제") ? articleMatch[0] : `제${articleMatch[0]}`;
@@ -232,10 +251,7 @@ export async function enrichLawReferences(referenceText, telemetry = null, execu
       const candidateNames = [reference.lawName];
       if (reference.lawName === "헌법") candidateNames.push("대한민국헌법");
       const candidate = candidates.find((item) => candidateNames.some((name) => normalizeCaseNumber(item.title) === normalizeCaseNumber(name)));
-      if (!candidate?.mst) {
-        enriched.push({ ...reference, text: "", link: "" });
-        continue;
-      }
+      if (!candidate?.mst) continue;
       const lawResult = await execute("get_law_text", {
         mst: candidate.mst,
         jo: reference.article,
@@ -243,16 +259,15 @@ export async function enrichLawReferences(referenceText, telemetry = null, execu
       const rawLawText = lawResultText(lawResult);
       const lawText = cleanLawArticleText(rawLawText);
       if (lawResult?.isError || !lawText || rawLawText.includes("[NOT_FOUND]")) {
-        enriched.push({ ...reference, text: "", link: sanitizeApiLink(candidate.link, candidate.mst) || lawDetailLink(candidate.mst) });
         continue;
       }
       enriched.push({
         ...reference,
         text: lawText,
-        link: sanitizeApiLink(candidate.link, candidate.mst) || lawDetailLink(candidate.mst),
+        link: lawDetailLink(candidate.mst, reference.article) || sanitizeApiLink(candidate.link, candidate.mst),
       });
     } catch {
-      enriched.push({ ...reference, text: "", link: "" });
+      continue;
     }
   }
   return enriched;

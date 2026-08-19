@@ -28,7 +28,9 @@ npm start
 npm run verify
 ```
 
-The server binds to `127.0.0.1`. `npm run verify` performs the syntax check and the network/model-free product test suite. `npm run verify:managed -- --skip-query` checks the packaged runtime contract without making a live legal query.
+The server binds to `127.0.0.1`. In a source checkout, `start.bat` uses the local `node.exe` on `PATH` when the packaged runtime is absent. `npm run verify` performs the syntax check and the network/model-free product test suite. `npm run verify:managed -- --skip-query` checks the packaged runtime contract without making a live legal query.
+
+For development-only Codex re-authentication, run `codex-login.bat` from the repository root. It requires local Node.js `>=24.14.0 <25` and the Windows x64 Codex package installed by `npm ci`; it does not copy, parse, or delete authentication files. The helper is checkout-specific and is not the managed installer entrypoint.
 
 ## Configuration
 
