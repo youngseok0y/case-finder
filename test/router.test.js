@@ -46,6 +46,17 @@ test("dates, statutes, quantities, and generic numbers stay natural", () => {
   }
 });
 
+test("router whitelist stays conservative for statute/date-like and unknown case-code text", () => {
+  for (const query of ["76조의5", "2026년5월", "제76조의5", "2026년 5월", "2027새12345"]) {
+    const route = routeQuery(query);
+    assert.equal(route.kind, "natural", query);
+    assert.deepEqual(route.cases, [], query);
+  }
+  for (const query of ["2023므11819", "2019후12094", "2023두61349"]) {
+    assert.equal(routeQuery(query).kind, "direct", query);
+  }
+});
+
 test("related, exclusion, and multiple-identifier intent stays natural", () => {
   for (const query of [
     "2024다12345와 유사한 판례 찾아줘",

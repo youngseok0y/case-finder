@@ -21,6 +21,7 @@ export class AoV2Telemetry {
       output_valid: true,
       model_protocol_clean: true,
       selection_repaired: false,
+      selection_repair_reasons: [],
       model,
       reasoning_effort: reasoningEffort,
       session_id: sessionId,
@@ -61,11 +62,12 @@ export class AoV2Telemetry {
     if (name === "get_decision_text" || name === "get_law_text") this.data.detail_calls += 1;
   }
 
-  recordSelectionGate({ rejectedSelected = [], output_valid = true, model_protocol_clean = true, selection_repaired = false } = {}) {
+  recordSelectionGate({ rejectedSelected = [], output_valid = true, model_protocol_clean = true, selection_repaired = false, selectionRepairReasons = [] } = {}) {
     this.data.unverified_selection_attempts += rejectedSelected.filter((item) => item.reason === "NOT_DETAIL_VERIFIED").length;
     this.data.output_valid = Boolean(output_valid);
     this.data.model_protocol_clean = Boolean(model_protocol_clean);
     this.data.selection_repaired = Boolean(selection_repaired);
+    this.data.selection_repair_reasons = Array.isArray(selectionRepairReasons) ? [...selectionRepairReasons] : [];
     this.data.protocol_pass = this.data.output_valid && this.data.model_protocol_clean;
   }
 

@@ -1,8 +1,8 @@
 import { config } from "../../../config.js";
-import { finalizeSelection } from "../finalSelectionGate.js";
 import { normalizeLegalToolResult } from "../legalToolGateway.js";
 import { createSafetyController } from "../safety.js";
 import { createTelemetry } from "../telemetry.js";
+import { createCommonEvidenceEnvelope } from "../commonEvidenceEnvelope.js";
 
 export const CODEX_NATIVE_ALLOWED_TOOLS = Object.freeze([
   "search_decisions",
@@ -47,9 +47,11 @@ export function createCodexNativeAo({
   safety = createSafetyController(),
   createSession,
   resultMax = config.resultMax,
+  envelope = null,
 } = {}) {
   if (!gateway) throw new Error("CODEX_NATIVE_AO_GATEWAY_REQUIRED");
   if (typeof createSession !== "function") throw new Error("CODEX_NATIVE_SESSION_FACTORY_REQUIRED");
+  const evidenceEnvelope = envelope || createCommonEvidenceEnvelope({ ledger, resultMax });
 
   return {
     provider: "codex_luna",
@@ -166,8 +168,12 @@ export function createCodexNativeAo({
             telemetry.setSessionId(event.session_id || event.sessionId || session?.sessionId || null);
             if (event.usage || event.elapsedMs) telemetry.recordModelTurn({ usage: event.usage || {}, elapsedMs: event.elapsedMs || 0 });
             const attempt = event.selection || event.value || event;
-            const gated = finalizeSelection(attempt, ledger, { resultMax });
-            telemetry.recordSelectionGate(gated);
+            const gated = evidenceEnvelope.finalizeSelection(attempt);
+            evidenceEnvelope.recordSelectionDiagnostic({ selection: attempt, gated, continuationCount: 0 });
+            telemetry.recordSelectionGate({
+              ...gated,
+              selectionRepairReasons: gated.selection_repair_reasons,
+            });
             telemetry.setStopReason("MODEL_FINAL");
             return {
               provider: "codex_luna",
