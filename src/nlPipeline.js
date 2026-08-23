@@ -417,6 +417,14 @@ export async function finalizeSelection({
   };
 }
 
+/**
+ * Finalizes Gemini D candidates through the closed-world/detail lookup path.
+ * Luna Native uses the separate EvidenceLedger/FinalSelectionGate path.
+ */
+export async function finalizeGeminiDResults(args) {
+  return finalizeSelection(args);
+}
+
 export async function runDeterministicPipeline(query, dependencies = {}) {
   const startedAt = Date.now();
   const reportProgress = typeof dependencies.onProgress === "function" ? dependencies.onProgress : () => {};
@@ -459,7 +467,9 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
   const lookupQueryLawReferencesFn = dependencies.lookupQueryLawReferences || lookupQueryLawReferences;
   const prepareCandidatesFn = dependencies.prepareCandidates || prepareCandidates;
   const selectCandidatesFn = dependencies.selectCandidates || pinnedRuntime.selectCandidates || selectCandidates;
-  const finalizeSelectionFn = dependencies.finalizeSelection || finalizeSelection;
+  const finalizeGeminiDResultsFn = dependencies.finalizeGeminiDResults
+    || dependencies.finalizeSelection
+    || finalizeGeminiDResults;
   let plan;
   let fallbackLabel = "";
   try {
@@ -508,7 +518,7 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     candidateCount: prepared.candidatesWithPreview.length,
     lawCount: lawReferences.length,
   });
-  const finalResult = await finalizeSelectionFn({
+  const finalResult = await finalizeGeminiDResultsFn({
     query,
     candidatesWithPreview: prepared.candidatesWithPreview,
     candidatePool: prepared.rankedCandidates,

@@ -66,6 +66,7 @@ export function caseIdentityMatches(left, right) {
 }
 
 export function evidenceProgressSnapshot(ledger) {
+  if (typeof ledger?.progressSnapshot === "function") return ledger.progressSnapshot();
   const snapshot = typeof ledger?.snapshot === "function" ? ledger.snapshot() : { cases: [], laws: [] };
   const cases = Array.isArray(snapshot.cases) ? snapshot.cases : [];
   return {
@@ -93,13 +94,17 @@ export function hasSubstantiveEvidenceProgress(before, after) {
 function caseState(item) {
   const caseNumber = item.rawCaseNumber || item.caseNumber || "";
   return {
-    provider_id: item.id || "",
+    provider_id: item.providerId || item.id || "",
+    evidence_key: item.evidenceKey || "",
+    evidence_state: item.evidenceState || (item.detailVerified ? "VERIFIED" : item.detailOpened ? "DETAIL_OPENED" : "OBSERVED"),
+    failure_code: item.failureCode || "",
     domain: item.domain || "",
     case_number: caseNumber,
     canonical_case_id: item.canonicalCaseId || item.caseKey || canonicalCaseIdentity(caseNumber),
     observed: Boolean(item.discovered),
     detail_opened: Boolean(item.detailOpened),
     detail_verified: Boolean(item.detailVerified),
+    detail_digest: item.detailDigest || "",
     selectable: Boolean(item.detailVerified),
   };
 }

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { normalizeCaseNumber } from "../router.js";
 import {
   canonicalCaseIdentity,
@@ -25,6 +25,16 @@ function rawCaseNumberOf(value) {
 
 function evidenceCaseKey(value) {
   return canonicalCaseIdentity(value) || normalizeCaseNumber(value);
+}
+
+function evidenceKeyOf(provider, domain, identity) {
+  const normalizedIdentity = canonicalCaseIdentity(identity) || normalizeCaseNumber(identity) || text(identity);
+  return `${text(provider) || "unknown"}:${text(domain) || "unknown"}:${normalizedIdentity}`;
+}
+
+function digestText(value) {
+  const source = text(value);
+  return source ? createHash("sha256").update(source, "utf8").digest("hex") : "";
 }
 
 export function providerBoundCaseIdentityCompatibility(observedCase, detailCase) {
@@ -120,11 +130,14 @@ export class EvidenceLedger {
     this.searchTraces = [];
     this.detailTraces = [];
     this.selectionTraces = [];
+    this.claimReferences = [];
+    this.detailTexts = new Map();
   }
 
   recordVerificationFailure(failure = {}) {
     const normalized = {
       code: text(failure.code),
+      evidenceKey: text(failure.evidenceKey),
       requestedId: text(failure.requestedId),
       requestedCaseNumber: rawCaseNumberOf(failure.requestedCaseNumber),
       detailCaseNumber: rawCaseNumberOf(failure.detailCaseNumber),
@@ -132,6 +145,7 @@ export class EvidenceLedger {
     if (!normalized.code) return;
     const duplicate = this.verificationFailures.some((item) =>
       item.code === normalized.code
+      && item.evidenceKey === normalized.evidenceKey
       && item.requestedId === normalized.requestedId
       && item.requestedCaseNumber === normalized.requestedCaseNumber
       && item.detailCaseNumber === normalized.detailCaseNumber,
@@ -169,6 +183,7 @@ export class EvidenceLedger {
       if (!candidate) {
         candidate = {
           caseKey: key,
+          evidenceKey: evidenceKeyOf(this.provider, domain, rawCaseNumber || caseNumber),
           canonicalCaseId: canonicalCaseIdentity(rawCaseNumber || caseNumber),
           caseNumber,
           domain: text(domain),
@@ -181,6 +196,11 @@ export class EvidenceLedger {
           firstSearchQuery: normalizedQuery,
           searchQueries: [],
           providerIds: [],
+          provider: this.provider,
+          providerId: "",
+          sourceTool: text(sourceTool) || "search_decisions",
+          evidenceState: "OBSERVED",
+          failureCode: "",
           detailOpened: false,
           detailVerified: false,
           court: "",
@@ -188,7 +208,7 @@ export class EvidenceLedger {
           title: "",
           id: "",
           sections: {},
-          rawText: "",
+          detailDigest: "",
           selectedAttempts: [],
         };
         this.cases.set(key, candidate);
@@ -200,8 +220,12 @@ export class EvidenceLedger {
       }
       candidate.discovered = true;
       candidate.domain ||= text(domain);
+      candidate.provider ||= this.provider;
+      candidate.evidenceKey ||= evidenceKeyOf(this.provider, domain, rawCaseNumber || caseNumber);
       uniquePush(candidate.searchQueries, normalizedQuery);
       uniquePush(candidate.providerIds, text(item.id || providerId));
+      candidate.providerId ||= text(item.id || providerId);
+      candidate.sourceTool ||= text(sourceTool) || "search_decisions";
       candidate.id ||= text(item.id);
       candidate.title ||= text(item.title);
       candidate.court ||= text(item.court);
@@ -223,6 +247,7 @@ export class EvidenceLedger {
     if (!candidate) {
       this.recordVerificationFailure({
         code: "SEARCH_NOT_OBSERVED",
+        evidenceKey: evidenceKeyOf(this.provider, domain, rawDetailCaseNumber),
         requestedId,
         requestedCaseNumber: rawDetailCaseNumber,
         detailCaseNumber: rawDetailCaseNumber,
@@ -242,15 +267,21 @@ export class EvidenceLedger {
     }
 
     candidate.detailOpened = true;
+    candidate.evidenceState = "DETAIL_OPENED";
+    candidate.failureCode = "";
     candidate.court ||= text(detail.court);
     candidate.date ||= text(detail.date);
     candidate.sections = { ...candidate.sections, ...(detail.sections || {}) };
     const parsed = parseProviderCompoundCaseNumber(rawDetailCaseNumber);
     const identityCompatibility = providerBoundCaseIdentityCompatibility(candidate.rawCaseNumber || candidate.caseNumber, rawDetailCaseNumber);
     const sameProviderProvenance = Boolean(requestedId && candidate.providerIds.includes(requestedId));
-    candidate.rawText ||= text(rawText);
-    candidate.detailVerified = Boolean(verified && sameProviderProvenance && identityCompatibility !== "mismatch" && text(rawText) && !parsed.ambiguous);
+    const normalizedRawText = text(rawText);
+    candidate.detailVerified = Boolean(verified && sameProviderProvenance && identityCompatibility !== "mismatch" && normalizedRawText && !parsed.ambiguous);
     if (candidate.detailVerified) {
+      if (candidate.evidenceKey) this.detailTexts.set(candidate.evidenceKey, normalizedRawText);
+      candidate.detailDigest = digestText(normalizedRawText);
+      candidate.evidenceState = "VERIFIED";
+      candidate.failureCode = "";
       mergeProviderCaseEvidence(candidate, rawDetailCaseNumber);
     } else {
       const code = !sameProviderProvenance
@@ -262,10 +293,13 @@ export class EvidenceLedger {
             : "DETAIL_CASE_NUMBER_AMBIGUOUS";
       const failure = {
         code,
+        evidenceKey: candidate.evidenceKey,
         requestedId,
         requestedCaseNumber: candidate.rawCaseNumber || candidate.caseNumber,
         detailCaseNumber: rawDetailCaseNumber,
       };
+      candidate.evidenceState = "REJECTED";
+      candidate.failureCode = code;
       candidate.verificationFailures ||= [];
       const duplicate = candidate.verificationFailures.some((item) =>
         item.code === failure.code
@@ -283,6 +317,7 @@ export class EvidenceLedger {
       requested_canonical_id: canonicalCaseIdentity(candidate.rawCaseNumber || candidate.caseNumber),
       returned_case_number: rawDetailCaseNumber,
       returned_canonical_id: canonicalCaseIdentity(rawDetailCaseNumber),
+      evidence_key: candidate.evidenceKey || "",
       matched_observed_candidate: candidate.canonicalCaseId || candidate.caseKey,
       detail_provider_id: requestedId,
       matched_provider_id: candidate.id || "",
@@ -295,6 +330,7 @@ export class EvidenceLedger {
       verified: candidate.detailVerified,
       reason: candidate.detailVerified ? "" : "DETAIL_NOT_VERIFIED",
       caseNumber: candidate.caseNumber,
+      evidenceKey: candidate.evidenceKey || "",
     };
   }
 
@@ -313,9 +349,16 @@ export class EvidenceLedger {
           title,
           lawId,
           mst,
+          evidenceKey: evidenceKeyOf(this.provider, "law", key),
+          provider: this.provider,
+          providerId: lawId || mst || key,
+          sourceTool: "search_law",
           observed: true,
+          evidenceState: "OBSERVED",
+          failureCode: "",
           searchQueries: [],
           textOpened: false,
+          detailDigest: "",
           openedArticles: [],
         };
         this.laws.set(key, law);
@@ -323,6 +366,9 @@ export class EvidenceLedger {
       }
       uniquePush(law.searchQueries, text(query));
       law.observed = true;
+      law.evidenceState ||= "OBSERVED";
+      law.provider ||= this.provider;
+      law.evidenceKey ||= evidenceKeyOf(this.provider, "law", key);
     }
     return { added, observed: items.length || 0 };
   }
@@ -332,20 +378,38 @@ export class EvidenceLedger {
     const targetLawId = text(lawId);
     const law = [...this.laws.values()].find((item) =>
       (targetMst && item.mst === targetMst) || (targetLawId && item.lawId === targetLawId));
-    if (!law) return { verified: false, reason: "LAW_NOT_OBSERVED" };
+    if (!law) {
+      this.recordVerificationFailure({
+        code: "LAW_NOT_OBSERVED",
+        evidenceKey: evidenceKeyOf(this.provider, "law", targetLawId || targetMst),
+      });
+      return { verified: false, reason: "LAW_NOT_OBSERVED" };
+    }
+    law.evidenceState = "DETAIL_OPENED";
+    law.failureCode = "";
     law.textOpened = Boolean(textOpened);
     const article = normalizeLawArticle(jo);
     if (law.textOpened && article) uniquePush(law.openedArticles, article);
-    return { verified: law.textOpened, reason: law.textOpened ? "" : "LAW_TEXT_NOT_OPENED" };
+    if (law.textOpened) {
+      law.evidenceState = "VERIFIED";
+    } else {
+      law.evidenceState = "REJECTED";
+      law.failureCode = "LAW_TEXT_NOT_OPENED";
+      this.recordVerificationFailure({ code: "LAW_TEXT_NOT_OPENED", evidenceKey: law.evidenceKey });
+    }
+    return { verified: law.textOpened, reason: law.failureCode, evidenceKey: law.evidenceKey };
   }
 
-  isLawArticleOpened({ mst = "", lawId = "", jo = "", article = "" } = {}) {
+  isLawArticleOpened({ mst = "", lawId = "", lawName = "", jo = "", article = "" } = {}) {
     const targetMst = text(mst);
     const targetLawId = text(lawId);
+    const targetLawName = text(lawName);
     const targetArticle = normalizeLawArticle(jo || article);
     if (!targetArticle) return false;
     return [...this.laws.values()].some((item) =>
-      ((!targetMst && !targetLawId) || (targetMst && item.mst === targetMst) || (targetLawId && item.lawId === targetLawId))
+      (!targetMst || item.mst === targetMst)
+      && (!targetLawId || item.lawId === targetLawId)
+      && (!targetLawName || item.title === targetLawName)
       && (item.openedArticles || []).includes(targetArticle),
     );
   }
@@ -373,6 +437,11 @@ export class EvidenceLedger {
       candidate.acceptedEvidenceKeys.includes(requestedKey)
       || (requestedMembers.length > 0 && requestedMembers.every((member) => candidate.canonicalMembers.includes(member))),
     ) || null;
+  }
+
+  getDetailText(caseNumber) {
+    const candidate = this.getCase(caseNumber);
+    return candidate?.evidenceKey ? this.detailTexts.get(candidate.evidenceKey) || "" : "";
   }
 
   getObservedCaseNumbers() {
@@ -417,6 +486,104 @@ export class EvidenceLedger {
     });
   }
 
+  progressCounts() {
+    let observedCases = 0;
+    let verifiedCases = 0;
+    let observedLaws = 0;
+    for (const item of this.cases.values()) {
+      if (item.discovered) observedCases += 1;
+      if (item.detailVerified) verifiedCases += 1;
+    }
+    for (const item of this.laws.values()) {
+      if (item.observed) observedLaws += 1;
+    }
+    return {
+      candidateCount: observedCases,
+      observedCases,
+      verifiedCount: verifiedCases,
+      verifiedCases,
+      lawCount: observedLaws,
+      evidenceCount: this.cases.size + this.laws.size,
+    };
+  }
+
+  progressSnapshot() {
+    const progress = this.progressCounts();
+    const caseIdentities = [];
+    const verifiedIdentities = [];
+    for (const item of this.cases.values()) {
+      const identity = canonicalCaseIdentity(item.rawCaseNumber || item.caseNumber);
+      if (!identity) continue;
+      if (item.discovered) caseIdentities.push(identity);
+      if (item.detailVerified) verifiedIdentities.push(identity);
+    }
+    return {
+      observed: progress.observedCases,
+      verified: progress.verifiedCases,
+      caseIdentities: caseIdentities.sort(),
+      verifiedIdentities: verifiedIdentities.sort(),
+    };
+  }
+
+  recordClaimReferences({ claims = [] } = {}) {
+    for (const claim of Array.isArray(claims) ? claims : []) {
+      const claimType = text(claim?.claimType);
+      const normalizedReference = claimType === "law"
+        ? normalizeLawArticle(claim?.normalizedReference || claim?.article)
+        : normalizeCaseNumber(claim?.normalizedReference || claim?.caseNumber);
+      if (!(["case", "law"].includes(claimType) && normalizedReference)) continue;
+      const requestedStatus = text(claim?.status);
+      let evidenceKey = text(claim?.evidenceKey);
+      let status = "removed";
+      let reason = text(claim?.reason);
+      if (claimType === "case") {
+        const candidate = this.getCase(normalizedReference);
+        evidenceKey ||= candidate?.evidenceKey || "";
+        if (requestedStatus !== "removed" && candidate?.detailVerified) {
+          status = "verified";
+          reason = "";
+        } else {
+          reason ||= candidate ? candidate.failureCode || "NOT_DETAIL_VERIFIED" : "CASE_NOT_OBSERVED";
+        }
+      } else {
+        const requestedLawId = text(claim?.lawId);
+        const requestedMst = text(claim?.mst);
+        const requestedLawName = text(claim?.lawName);
+        const sameLaw = (item) => (!requestedLawId || item.lawId === requestedLawId)
+          && (!requestedMst || item.mst === requestedMst)
+          && (!requestedLawName || item.title === requestedLawName);
+        const openedLaw = [...this.laws.values()].find((item) => sameLaw(item) && (item.openedArticles || []).includes(normalizedReference));
+        const observedLaw = openedLaw || [...this.laws.values()].find((item) => sameLaw(item) && item.observed);
+        evidenceKey ||= observedLaw?.evidenceKey || "";
+        if (requestedStatus !== "removed" && openedLaw) {
+          status = "verified";
+          reason = "";
+        } else {
+          reason ||= observedLaw ? observedLaw.failureCode || "LAW_ARTICLE_NOT_OPENED" : "LAW_NOT_OBSERVED";
+        }
+      }
+      const normalized = {
+        claimType,
+        normalizedReference,
+        lawName: claimType === "law" ? text(claim?.lawName) : "",
+        lawId: claimType === "law" ? text(claim?.lawId) : "",
+        mst: claimType === "law" ? text(claim?.mst) : "",
+        evidenceKey,
+        status,
+        reason,
+      };
+      const duplicate = this.claimReferences.some((item) =>
+        item.claimType === normalized.claimType
+        && item.normalizedReference === normalized.normalizedReference
+        && item.evidenceKey === normalized.evidenceKey
+        && item.status === normalized.status
+        && item.reason === normalized.reason,
+      );
+      if (!duplicate) this.claimReferences.push(normalized);
+    }
+    return this.claimReferences.map((item) => ({ ...item }));
+  }
+
   recordSelectionDiagnostic({ selection, gated, continuationCount = 0 } = {}) {
     const normalizeSelection = (items) => (Array.isArray(items) ? items : []).map((item) => {
       const caseNumber = text(item?.case_no || item?.caseNumber);
@@ -450,7 +617,7 @@ export class EvidenceLedger {
     return {
       provider: this.provider,
       scopeId: this.scopeId,
-      cases: [...this.cases.values()].map((item) => ({
+      cases: [...this.cases.values()].map(({ rawText: _rawText, ...item }) => ({
         ...item,
         rawCaseNumbers: [...item.rawCaseNumbers],
         canonicalMembers: [...item.canonicalMembers],
@@ -468,6 +635,7 @@ export class EvidenceLedger {
       })),
       selectionAttempts: this.selectionAttempts.map((attempt) => attempt.map((item) => ({ ...item }))),
       verificationFailures: this.verificationFailures.map((failure) => ({ ...failure })),
+      claimReferences: this.claimReferences.map((claim) => ({ ...claim })),
       searchTraces: this.searchTraces.map((trace) => ({
         ...trace,
         returned_candidate_ids: [...trace.returned_candidate_ids],

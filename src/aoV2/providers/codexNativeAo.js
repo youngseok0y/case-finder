@@ -19,6 +19,26 @@ const FORBIDDEN_EVENT_TYPES = new Set([
   "github",
 ]);
 
+function ledgerProgress(ledger) {
+  if (typeof ledger?.progressCounts === "function") return ledger.progressCounts();
+  const snapshot = ledger?.snapshot?.() || { cases: [], laws: [] };
+  return {
+    candidateCount: snapshot.cases.filter((item) => item.discovered).length,
+    verifiedCount: snapshot.cases.filter((item) => item.detailVerified).length,
+    lawCount: snapshot.laws.filter((item) => item.observed).length,
+    evidenceCount: snapshot.cases.length + snapshot.laws.length,
+  };
+}
+
+function ledgerProgressEvent(ledger) {
+  const progress = ledgerProgress(ledger);
+  return {
+    candidateCount: progress.candidateCount,
+    verifiedCount: progress.verifiedCount,
+    lawCount: progress.lawCount,
+  };
+}
+
 export function buildLunaNativePrompt(query) {
   return [
     "사용자 질문:",
@@ -60,11 +80,11 @@ export function createCodexNativeAo({
           ? toolResult
           : normalizeLegalToolResult(name, toolResult || {});
         if (!normalized || normalized.isError) return;
-        const snapshot = ledger.snapshot();
+        const progressSnapshot = ledgerProgressEvent(ledger);
         const progress = {
-          candidateCount: snapshot.cases.filter((item) => item.discovered).length,
-          verifiedCount: snapshot.cases.filter((item) => item.detailVerified).length,
-          lawCount: snapshot.laws.filter((item) => item.observed).length,
+          candidateCount: progressSnapshot.candidateCount,
+          verifiedCount: progressSnapshot.verifiedCount,
+          lawCount: progressSnapshot.lawCount,
         };
         if (name === "search_law" || name === "get_law_text") onProgress("LAW_EVIDENCE_UPDATED", progress);
         if (name === "search_decisions") onProgress("CANDIDATES_FOUND", progress);
@@ -152,29 +172,30 @@ export function createCodexNativeAo({
             if (event.delegated === true) {
               safety.recordLegalToolCall();
               telemetry.recordToolCall(name, {});
-              safety.noteEvidenceCount(ledger.snapshot().cases.length + ledger.snapshot().laws.length);
+              safety.noteEvidenceCount(ledgerProgress(ledger).evidenceCount);
               continue;
             }
             const result = await gateway.execute(name, event.arguments || event.args || {});
             if (typeof session.respondToToolCall !== "function") throw new Error("CODEX_NATIVE_SESSION_TOOL_RESPONSE_REQUIRED");
             await session.respondToToolCall({ callId: event.call_id || event.callId || null, name, result });
-            safety.noteEvidenceCount(ledger.snapshot().cases.length + ledger.snapshot().laws.length);
+            safety.noteEvidenceCount(ledgerProgress(ledger).evidenceCount);
             continue;
           }
           if (event.type === "final") {
+            const finalProgress = ledgerProgressEvent(ledger);
             onProgress("FINALIZING", {
-              candidateCount: ledger.snapshot().cases.filter((item) => item.discovered).length,
-              verifiedCount: ledger.snapshot().cases.filter((item) => item.detailVerified).length,
-              lawCount: ledger.snapshot().laws.filter((item) => item.observed).length,
+              candidateCount: finalProgress.candidateCount,
+              verifiedCount: finalProgress.verifiedCount,
+              lawCount: finalProgress.lawCount,
             });
             telemetry.setSessionId(event.session_id || event.sessionId || session?.sessionId || null);
             if (event.usage || event.elapsedMs) telemetry.recordModelTurn({ usage: event.usage || {}, elapsedMs: event.elapsedMs || 0 });
             const modelResolution = event.modelResolution || null;
             if (isLunaTerraFallback(modelResolution)) {
               onProgress("MODEL_FALLBACK", {
-                candidateCount: ledger.snapshot().cases.filter((item) => item.discovered).length,
-                verifiedCount: ledger.snapshot().cases.filter((item) => item.detailVerified).length,
-                lawCount: ledger.snapshot().laws.filter((item) => item.observed).length,
+                candidateCount: finalProgress.candidateCount,
+                verifiedCount: finalProgress.verifiedCount,
+                lawCount: finalProgress.lawCount,
                 fallbackApplied: true,
                 requestedModel: modelResolution.requestedModel,
                 effectiveModel: modelResolution.effectiveModel,

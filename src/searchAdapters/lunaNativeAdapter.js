@@ -142,7 +142,7 @@ export function buildLunaResultItems(result = {}, ledger = null) {
         court: candidate.court || "",
         date: candidate.date || "",
         sections: candidate.sections || {},
-        rawText: candidate.rawText || "",
+        rawText: ledger.getDetailText?.(requestedCaseNumber) || candidate.rawText || "",
       },
       lawReferences: [],
       match: selection?.match || "related",
@@ -177,6 +177,15 @@ export function createLunaNativeAdapter({
       const lawEnrichment = context.gateway
         ? await enrichLunaRelatedLawReferences(items, { gateway: context.gateway, telemetry: context.telemetry })
         : { items, lawReferences: buildLunaLawReferences(result) };
+      ledger?.recordClaimReferences?.({
+        claims: lawEnrichment.lawReferences.map((law) => ({
+          claimType: "law",
+          normalizedReference: law.article,
+          lawName: law.lawName,
+          lawId: law.lawId,
+          mst: law.mst,
+        })),
+      });
       const candidateCaseNumbers = ledger?.getObservedCaseNumbers?.() || result.candidateCaseNumbers || [];
       return toResultContract({
         ...result,

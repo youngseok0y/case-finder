@@ -11,7 +11,7 @@ import { renderResults } from "./renderer.js";
 import { routeQuery } from "./router.js";
 import { createProgressReporter } from "./progress.js";
 import { defaultSearchAdapterRegistry } from "./searchAdapters/registry.js";
-import { toResultContract } from "./searchAdapters/resultContract.js";
+import { assertResultContract } from "./searchAdapters/resultContract.js";
 import { validateDirectResult, validateNaturalResult } from "./validator.js";
 import {
   closeDefaultCodexAppServerRuntime,
@@ -281,7 +281,7 @@ async function executeQuery(query, onProgress = () => {}) {
     onProgress: (event, details) => progress.emit(event, { ...details, route: "natural" }),
   });
   const validated = await validateNaturalResult(adapterResult);
-  const publicResult = toResultContract(validated);
+  const publicResult = assertResultContract(validated);
   const response = responseForResult({
     query,
     route: "natural",

@@ -39,16 +39,28 @@ function narrativeCaseReferences(value) {
   return references;
 }
 
+const LAW_NAME_ARTICLE_PATTERN = /([\uAC00-\uD7A3A-Za-z0-9\u00B7]+) +((?:\uC81C)?[0-9]+\uC870(?:\uC758[0-9]+)?(?:\uC81C[0-9]+\uD56D)?(?:\uC81C[0-9]+\uD638)?)/gu;
+
+function narrativeLawReferences(value) {
+  return [...value.matchAll(LAW_NAME_ARTICLE_PATTERN)].map((match) => ({
+    lawName: text(match[1]),
+    article: normalizeLawArticle(match[2]),
+  })).filter((reference) => reference.lawName && reference.article);
+}
+
 export function sanitizeEvidenceNarrative(intro, {
   isCaseVerified = () => false,
   isLawArticleOpened = () => false,
 } = {}) {
   const source = text(intro);
-  if (!source) return { text: "", sanitized: false, diagnostics: [] };
+  if (!source) return { text: "", sanitized: false, diagnostics: [], references: [] };
   const diagnostics = new Set();
+  const references = [];
   const safeSegments = narrativeSegments(source).filter((segment) => {
     let safe = true;
+    const lawReferences = narrativeLawReferences(segment);
     for (const reference of narrativeCaseReferences(segment)) {
+      references.push({ claimType: "case", normalizedReference: reference.caseNumber });
       if (!isCaseVerified(reference.caseNumber)) {
         diagnostics.add("INTRO_UNVERIFIED_CASE_REFERENCE_REMOVED");
         safe = false;
@@ -56,7 +68,9 @@ export function sanitizeEvidenceNarrative(intro, {
     }
     for (const match of segment.matchAll(LAW_ARTICLE_PATTERN)) {
       const article = normalizeLawArticle(match[0]);
-      if (article && !isLawArticleOpened(article)) {
+      const lawReference = lawReferences.find((reference) => reference.article === article) || {};
+      if (article) references.push({ claimType: "law", normalizedReference: article, lawName: lawReference.lawName || "" });
+      if (article && !isLawArticleOpened(article, lawReference)) {
         diagnostics.add("INTRO_UNVERIFIED_LAW_ARTICLE_REMOVED");
         safe = false;
       }
@@ -67,6 +81,7 @@ export function sanitizeEvidenceNarrative(intro, {
     text: safeSegments.join(" ").trim(),
     sanitized: diagnostics.size > 0,
     diagnostics: [...diagnostics].map((code) => ({ code })),
+    references,
   };
 }
 
@@ -112,9 +127,21 @@ export function finalizeSelection(selection, ledger, { resultMax = 5 } = {}) {
   }));
   const narrative = sanitizeEvidenceNarrative(selection?.intro, {
     isCaseVerified: (caseNumber) => Boolean(ledger.isFinalEligible?.(caseNumber)),
-    isLawArticleOpened: (article) => Boolean(ledger.isLawArticleOpened?.({ article })),
+    isLawArticleOpened: (article, context = {}) => Boolean(ledger.isLawArticleOpened?.({ ...context, article })),
   });
   const intro = narrative.text;
+  ledger.recordClaimReferences?.({
+    claims: [
+      ...eligibleSelected.map((item) => ({ claimType: "case", normalizedReference: item.case_no })),
+      ...rejectedSelected.map((item) => ({
+        claimType: "case",
+        normalizedReference: item.case_no,
+        status: "removed",
+        reason: item.reason,
+      })),
+      ...(narrative.references || []),
+    ],
+  });
   protocolDiagnostics.push(...narrative.diagnostics);
   const selectionRepaired = !selectionShapeValid || rejectedSelected.length > 0 || narrative.sanitized || selected.length > resultMax;
   const outputValid = true;

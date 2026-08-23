@@ -85,8 +85,17 @@ export class AoV2Telemetry {
   snapshot(ledger = null) {
     const next = { ...this.data };
     if (ledger) {
-      next.observed_cases = ledger.snapshot().cases.filter((item) => item.discovered).length;
-      next.verified_cases = ledger.snapshot().cases.filter((item) => item.detailVerified).length;
+      const progress = typeof ledger.progressCounts === "function"
+        ? ledger.progressCounts()
+        : (() => {
+            const snapshot = ledger.snapshot();
+            return {
+              observedCases: snapshot.cases.filter((item) => item.discovered).length,
+              verifiedCases: snapshot.cases.filter((item) => item.detailVerified).length,
+            };
+          })();
+      next.observed_cases = progress.observedCases;
+      next.verified_cases = progress.verifiedCases;
     }
     return next;
   }
