@@ -9,6 +9,7 @@ const progressLabel = document.querySelector("#progress-label");
 const progressPercent = document.querySelector("#progress-percent");
 const progressBar = document.querySelector("#progress-bar");
 const exampleChips = [...document.querySelectorAll("[data-example]")];
+const examplePrompts = document.querySelector("#example-prompts");
 const serviceStatus = document.querySelector("#service-status");
 const refreshStatus = document.querySelector("#refresh-status");
 const toast = document.querySelector("#toast");
@@ -54,6 +55,41 @@ function setStatus(message, state = "idle") {
   searchStatus.dataset.state = state;
 }
 
+function setExampleVisibility(terminalState) {
+  if (examplePrompts) examplePrompts.hidden = terminalState === "NO_RESULT";
+}
+
+function addRetryAction() {
+  const panel = result.querySelector(".state-panel");
+  if (!panel || panel.querySelector('[data-action="retry"]')) return;
+  const actions = document.createElement("div");
+  actions.className = "cta-row";
+  const button = document.createElement("button");
+  button.className = "secondary-button";
+  button.type = "button";
+  button.dataset.action = "retry";
+  button.textContent = "다시 검색";
+  actions.append(button);
+  panel.append(actions);
+}
+
+function addRelatedHint() {
+  const section = result.querySelector(".result-section");
+  const related = section?.querySelectorAll(".match-label.is-related");
+  if (!section || !related?.length || section.querySelector(".related-hint")) return;
+  const details = document.createElement("details");
+  details.className = "related-hint";
+  const summary = document.createElement("summary");
+  summary.textContent = "관련 판례란?";
+  const explanation = document.createElement("p");
+  const hasDirect = section.querySelector(".match-label:not(.is-related)");
+  explanation.textContent = hasDirect
+    ? "직접 관련 판례와 함께 질문의 쟁점이 비슷한 판례도 포함되어 있어요."
+    : "질문과 정확히 일치하는 판례를 찾지 못해 쟁점이 비슷한 판례를 보여드려요.";
+  details.append(summary, explanation);
+  section.insertBefore(details, section.querySelector(".case-card"));
+}
+
 function resetProgress() {
   lastProgressRank = -1;
   progressBar.style.width = "0%";
@@ -77,6 +113,8 @@ function showFailure(payload) {
   const heading = FAILURE_HEADINGS[payload?.terminalState] || "검색을 완료하지 못했습니다";
   result.innerHTML = `<section class="state-panel state-error"><h2>${escapeHtml(heading)}</h2><p>${escapeHtml(message)}</p></section>`;
   setStatus(message, "error");
+  setExampleVisibility(payload?.terminalState);
+  addRetryAction();
 }
 
 function showFallbackToast(payload) {
@@ -135,6 +173,9 @@ async function consumeStream(response) {
         if (event === "FINAL") {
           finalReceived = true;
           if (payload.html) result.innerHTML = payload.html;
+          setExampleVisibility(payload?.result?.terminalState || payload?.terminalState);
+          addRetryAction();
+          addRelatedHint();
           showTerminalStatus(payload);
         } else if (event === "SEARCH_FAILED") {
           failed = true;
@@ -152,6 +193,11 @@ async function consumeStream(response) {
   }
   if (!finalReceived && !failed) throw new Error("검색 결과가 끝나기 전에 연결이 종료됐습니다.");
 }
+result.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element) || !event.target.closest('[data-action="retry"]')) return;
+  form.requestSubmit();
+});
+
 
 async function submitSearch(event) {
   event.preventDefault();

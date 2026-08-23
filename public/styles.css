@@ -124,6 +124,12 @@ a.case-number:hover { text-decoration: underline; text-decoration-color: var(--l
 .case-more > summary::after, .law-details > summary::after { content: "›"; display: inline-block; transform: rotate(90deg); font-size: 0.95rem; }
 .case-more[open] > summary::after, .law-details[open] > summary::after { transform: rotate(-90deg); }
 .case-more p { margin: 12px 0 0; padding-left: 16px; border-left: 2px solid var(--line); color: var(--ink-2); font-size: 0.95rem; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.related-hint { max-width: var(--measure); margin: 14px 0 0; }
+.related-hint > summary { display: inline-flex; align-items: center; gap: 5px; list-style: none; cursor: pointer; color: var(--accent); font-size: 0.85rem; font-weight: 600; }
+.related-hint > summary::-webkit-details-marker { display: none; }
+.related-hint > summary::after { content: "›"; display: inline-block; transform: rotate(90deg); font-size: 0.95rem; }
+.related-hint[open] > summary::after { transform: rotate(-90deg); }
+.related-hint > p { margin: 10px 0 0; padding-left: 16px; border-left: 2px solid var(--line); color: var(--ink-2); font-size: 0.9rem; line-height: 1.7; }
 
 .law-list { margin: 0; padding: 0; list-style: none; }
 .law-reference { padding: 16px 0; border-bottom: 1px solid var(--line); }

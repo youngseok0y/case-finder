@@ -128,3 +128,19 @@ test("Admin and Index operating UI consume weekly normalized fields only", async
   assert.doesNotMatch(appJs, /payload\.quota\?\.luna/iu);
   assert.doesNotMatch(appJs, /planType.*free/iu);
 });
+
+test("progress copy and search examples use the approved user-facing wording", async () => {
+  const [indexHtml, appJs] = await Promise.all([
+    fs.readFile(path.join(ROOT, "public", "index.html"), "utf8"),
+    fs.readFile(path.join(ROOT, "public", "app.js"), "utf8"),
+  ]);
+  const events = [];
+  createProgressReporter((event) => events.push(event)).emit("LAW_EVIDENCE_UPDATED");
+  assert.equal(events[0].label, "법령 근거 확인 중");
+  assert.equal(events[0].percent, 40);
+  assert.match(indexHtml, /data-example="2014헌나8"/u);
+  assert.doesNotMatch(indexHtml, /2020다12345/u);
+  assert.match(appJs, /terminalState === "NO_RESULT"/u);
+  assert.match(appJs, /data-action="retry"/u);
+  assert.match(appJs, /addRelatedHint/u);
+});

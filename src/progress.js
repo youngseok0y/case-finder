@@ -41,7 +41,7 @@ const EVENT_LABEL = Object.freeze({
   SEARCH_STARTED: "검색을 시작했습니다.",
   ROUTE_IDENTIFIED: "질문 유형을 확인했습니다.",
   ANALYSIS_COMPLETE: "질문을 분석했습니다.",
-  LAW_EVIDENCE_UPDATED: "관련 법령을 확인하고 있습니다.",
+  LAW_EVIDENCE_UPDATED: "법령 근거 확인 중",
   CANDIDATES_FOUND: "판례 후보를 찾고 있습니다.",
   DETAIL_VERIFIED: "판례 원문을 검증하고 있습니다.",
   FINALIZING: "검증된 결과를 정리하고 있습니다.",
