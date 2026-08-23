@@ -4,6 +4,72 @@ function text(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+const LAW_ARTICLE_PATTERN = /(?<!\d)(?:제)?\d+조(?:의\d+)?(?:제\d+항)?(?:제\d+호)?/gu;
+const GENERIC_PROVIDER_CASE_PATTERN = /(?<!\d)((?:19|20)\d{2}|\d{2})\s*([가-힣]{1,4})\s*(\d{1,7})(?!\d)/gu;
+const NON_CASE_HANGUL_CODES = new Set(["년", "년도", "월", "일", "조", "항", "호", "개", "명", "회", "세", "시", "분", "초", "원", "만원"]);
+
+export function normalizeLawArticle(value) {
+  const source = text(value).replace(/\s+/gu, "");
+  const match = source.match(/^(?:제)?(\d{1,4})조(?:의(\d{1,2}))?/u);
+  if (!match) return "";
+  return `제${Number.parseInt(match[1], 10)}조${match[2] ? `의${Number.parseInt(match[2], 10)}` : ""}`;
+}
+
+function narrativeSegments(value) {
+  const segments = text(value)
+    .split(/(?<=[.!?。！？])\s*|\r?\n+/u)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  return segments.length > 0 ? segments : [text(value)];
+}
+
+function narrativeCaseReferences(value) {
+  const references = extractCaseNumbers(value).map((reference) => ({
+    caseNumber: reference.caseNumber,
+    raw: reference.raw,
+  }));
+  const seen = new Set(references.map((reference) => normalizeCaseNumber(reference.caseNumber)));
+  for (const match of value.matchAll(GENERIC_PROVIDER_CASE_PATTERN)) {
+    if (NON_CASE_HANGUL_CODES.has(match[2])) continue;
+    const caseNumber = normalizeCaseNumber(match[0]);
+    if (!caseNumber || seen.has(caseNumber)) continue;
+    seen.add(caseNumber);
+    references.push({ caseNumber, raw: match[0] });
+  }
+  return references;
+}
+
+export function sanitizeEvidenceNarrative(intro, {
+  isCaseVerified = () => false,
+  isLawArticleOpened = () => false,
+} = {}) {
+  const source = text(intro);
+  if (!source) return { text: "", sanitized: false, diagnostics: [] };
+  const diagnostics = new Set();
+  const safeSegments = narrativeSegments(source).filter((segment) => {
+    let safe = true;
+    for (const reference of narrativeCaseReferences(segment)) {
+      if (!isCaseVerified(reference.caseNumber)) {
+        diagnostics.add("INTRO_UNVERIFIED_CASE_REFERENCE_REMOVED");
+        safe = false;
+      }
+    }
+    for (const match of segment.matchAll(LAW_ARTICLE_PATTERN)) {
+      const article = normalizeLawArticle(match[0]);
+      if (article && !isLawArticleOpened(article)) {
+        diagnostics.add("INTRO_UNVERIFIED_LAW_ARTICLE_REMOVED");
+        safe = false;
+      }
+    }
+    return safe;
+  });
+  return {
+    text: safeSegments.join(" ").trim(),
+    sanitized: diagnostics.size > 0,
+    diagnostics: [...diagnostics].map((code) => ({ code })),
+  };
+}
+
 export function finalizeSelection(selection, ledger, { resultMax = 5 } = {}) {
   const selected = Array.isArray(selection?.selected) ? selection.selected : [];
   const selectionShapeValid = Array.isArray(selection?.selected) && typeof selection?.intro === "string";
@@ -44,15 +110,15 @@ export function finalizeSelection(selection, ledger, { resultMax = 5 } = {}) {
     code: item.reason === "NOT_DETAIL_VERIFIED" ? "MODEL_UNVERIFIED_SELECTION_ATTEMPT" : item.reason,
     case_no: item.case_no,
   }));
-  let intro = text(selection?.intro);
-  const introRemoved = Boolean(intro && extractCaseNumbers(intro).length > 0);
-  if (introRemoved) {
-    intro = "";
-    protocolDiagnostics.push({ code: "INTRO_CASE_NUMBER_REMOVED" });
-  }
-  const selectionRepaired = !selectionShapeValid || rejectedSelected.length > 0 || introRemoved || selected.length > resultMax;
+  const narrative = sanitizeEvidenceNarrative(selection?.intro, {
+    isCaseVerified: (caseNumber) => Boolean(ledger.isFinalEligible?.(caseNumber)),
+    isLawArticleOpened: (article) => Boolean(ledger.isLawArticleOpened?.({ article })),
+  });
+  const intro = narrative.text;
+  protocolDiagnostics.push(...narrative.diagnostics);
+  const selectionRepaired = !selectionShapeValid || rejectedSelected.length > 0 || narrative.sanitized || selected.length > resultMax;
   const outputValid = true;
-  const modelProtocolClean = selectionShapeValid && rejectedSelected.length === 0 && !introRemoved && selected.length <= resultMax;
+  const modelProtocolClean = selectionShapeValid && rejectedSelected.length === 0 && selected.length <= resultMax;
   if (selected.length > resultMax) protocolDiagnostics.push({ code: "RESULT_MAX_TRUNCATED" });
   return {
     selected: eligibleSelected,

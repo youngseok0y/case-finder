@@ -1,9 +1,9 @@
 export const PRODUCT_SERVICE = "case-finder";
 
-export const LUNA_SDK_RUNTIME_MESSAGE = "Luna SDK 실행 구성요소를 시작하지 못했습니다. Case Finder를 다시 실행하고 Codex/ChatGPT 로그인 상태와 설치된 SDK 구성요소를 확인한 뒤 다시 시도하세요.";
+export const LUNA_APP_SERVER_RUNTIME_MESSAGE = "Luna app-server 실행 구성요소를 시작하지 못했습니다. Case Finder를 다시 실행하고 Codex/ChatGPT 로그인 상태와 설치된 runtime을 확인한 뒤 다시 시도하세요.";
 export const LUNA_AUTH_REQUIRED_MESSAGE = "Luna Native 로그인이 필요합니다. Codex/Luna 로그인을 완료한 뒤 다시 시도해 주세요.";
 export const LUNA_RUNTIME_ERROR_MESSAGE = "Luna Native 실행 중 오류가 발생했습니다. 설치 상태와 로그를 확인해 주세요.";
-export const LUNA_RUNTIME_UNAVAILABLE_MESSAGE = LUNA_SDK_RUNTIME_MESSAGE;
+export const LUNA_RUNTIME_UNAVAILABLE_MESSAGE = LUNA_APP_SERVER_RUNTIME_MESSAGE;
 
 export const SAFETY_REJECTED_MESSAGE = "검색 결과를 안전하게 검증하지 못해 결과를 표시하지 않았습니다. 다시 검색해 주세요.";
 

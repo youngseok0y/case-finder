@@ -6,9 +6,14 @@ import { createTelemetry } from "./telemetry.js";
 import { createCodexNativeAo } from "./providers/codexNativeAo.js";
 import { createCommonEvidenceEnvelope } from "./commonEvidenceEnvelope.js";
 
-export { createEvidenceLedger } from "./evidenceLedger.js";
+export { createEvidenceLedger, providerBoundCaseIdentityCompatibility } from "./evidenceLedger.js";
 export { createLegalToolGateway, LEGAL_TOOL_NAMES } from "./legalToolGateway.js";
-export { createFinalSelectionGate, finalizeSelection } from "./finalSelectionGate.js";
+export {
+  createFinalSelectionGate,
+  finalizeSelection,
+  normalizeLawArticle,
+  sanitizeEvidenceNarrative,
+} from "./finalSelectionGate.js";
 export { createSafetyController } from "./safety.js";
 export { createTelemetry } from "./telemetry.js";
 export { createCodexNativeAo } from "./providers/codexNativeAo.js";

@@ -15,7 +15,7 @@ if exist "%~dp0app\src\server.js" if exist "%~dp0runtime\node\node.exe" (
 )
 cd /d "%APP_ROOT%"
 
-if "%MANAGED_RUNTIME%"=="1" if not exist "%APP_ROOT%\node_modules\@openai\codex-sdk\package.json" (
+if "%MANAGED_RUNTIME%"=="1" if not exist "%APP_ROOT%\node_modules\@openai\codex\package.json" (
   echo Codex SDK package is missing from the installed dependency tree.
   echo Reinstall the application dependencies in the app directory and retry.
   exit /b 1
@@ -45,7 +45,7 @@ if "%MANAGED_RUNTIME%"=="0" if not exist "node_modules\.bin\korean-law-mcp.cmd" 
   )
 )
 
-if "%MANAGED_RUNTIME%"=="0" if not exist "node_modules\@openai\codex-sdk\package.json" (
+if "%MANAGED_RUNTIME%"=="0" if not exist "node_modules\@openai\codex\package.json" (
   echo Codex SDK package is missing after npm ci.
   exit /b 1
 )

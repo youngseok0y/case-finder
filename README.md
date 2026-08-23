@@ -18,7 +18,7 @@ Case Finder is a local Fable-format legal precedent search application. It retri
 - Windows local runtime or Node.js `>=24.14.0 <25`
 - A configured law.go Open API credential in `.env` as `LAW_OC`
 - `GEMINI_API_KEY` for the Gemini adapter
-- Packaged installations provide private Node.js and the pinned Codex SDK runtime
+- Packaged installations provide private Node.js and the pinned Codex app-server runtime
 
 ## Development
 

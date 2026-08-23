@@ -113,6 +113,7 @@ export const SELECTION_REPAIR_REASON_CODES = Object.freeze([
   "RANK_ORDER_NORMALIZATION",
   "DUPLICATE_CASE_NORMALIZATION",
   "COMPOUND_CASE_NORMALIZATION",
+  "NARRATIVE_SANITIZED",
   "OTHER",
 ]);
 
@@ -129,6 +130,9 @@ export function selectionRepairReasons({ selection, gated, ledger } = {}) {
   }
   if (Array.isArray(gated?.protocolDiagnostics) && gated.protocolDiagnostics.some((item) => item.code === "RESULT_MAX_TRUNCATED")) {
     reasons.add("RANK_ORDER_NORMALIZATION");
+  }
+  if (Array.isArray(gated?.protocolDiagnostics) && gated.protocolDiagnostics.some((item) => item.code === "INTRO_UNVERIFIED_CASE_REFERENCE_REMOVED" || item.code === "INTRO_UNVERIFIED_LAW_ARTICLE_REMOVED")) {
+    reasons.add("NARRATIVE_SANITIZED");
   }
   if (selected.some((item) => {
     const requested = text(item?.case_no || item?.caseNumber);

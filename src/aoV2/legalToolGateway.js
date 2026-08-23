@@ -4,13 +4,9 @@ import { parseDecisionDetail, parseDecisionSearchResults, parseLawSearchResults,
 import { createEvidenceLedger } from "./evidenceLedger.js";
 import { createSafetyController } from "./safety.js";
 import { createTelemetry } from "./telemetry.js";
+import { createLegalDynamicTools, LEGAL_TOOL_NAMES } from "./legalToolDefinitions.js";
 
-export const LEGAL_TOOL_NAMES = Object.freeze([
-  "search_decisions",
-  "search_law",
-  "get_decision_text",
-  "get_law_text",
-]);
+export { LEGAL_TOOL_NAMES } from "./legalToolDefinitions.js";
 
 const DECISION_DOMAINS = new Set(["precedent", "constitutional", "admin_appeal"]);
 
@@ -112,7 +108,7 @@ export class LegalToolGateway {
   }
 
   toolDefinitions() {
-    return LEGAL_TOOL_NAMES.map((name) => ({ name, kind: "legal", restricted: true }));
+    return createLegalDynamicTools();
   }
 
   reject(code, message) {
@@ -169,7 +165,12 @@ export class LegalToolGateway {
         verified: !normalized.isError,
       });
     } else if (name === "get_law_text") {
-      this.ledger.recordLawText({ mst: args.mst, lawId: args.lawId, textOpened: !normalized.isError && Boolean(normalized.rawText) });
+      this.ledger.recordLawText({
+        mst: args.mst,
+        lawId: args.lawId,
+        jo: args.jo,
+        textOpened: !normalized.isError && Boolean(normalized.rawText),
+      });
     }
     return normalized;
   }

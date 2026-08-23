@@ -52,6 +52,19 @@ function renderLawReference(reference) {
   return `<li class="law-reference">${title}${content}</li>`;
 }
 
+function renderLawSection(references) {
+  const laws = [];
+  const seenLaws = new Set();
+  for (const law of references || []) {
+    const key = `${law?.lawName || ""}|${law?.article || ""}|${law?.link || ""}`;
+    if (seenLaws.has(key)) continue;
+    seenLaws.add(key);
+    const rendered = renderLawReference(law);
+    if (rendered) laws.push(rendered);
+  }
+  return laws.length > 0 ? `<section class="result-section"><h2>관련 법규</h2><ul class="law-list">${laws.join("")}</ul></section>` : "";
+}
+
 function renderCase(item) {
   if (item?.status !== "verified") return "";
   const href = safeHref(item.link, ["/LSW/precInfoP.do", "/LSW/detcInfoP.do"]);
@@ -87,29 +100,23 @@ export function renderResults(result = {}) {
   const state = result.terminalState || "SUCCESS";
   const query = `<p class="query"><span class="eyebrow">사용자 질문</span><strong>${escapeHtml(result.query)}</strong></p>`;
   if (state === "SAFETY_REJECTED" || state === "SEARCH_FAILED" || state === "NO_RESULT") {
+    if (state === "NO_RESULT" && result.route !== "direct") {
+      const rationale = result.intro
+        ? `<p class="intro">${textBlock(result.intro)}</p>`
+        : `<p class="empty">${escapeHtml(NO_RESULT_MESSAGE)}</p>`;
+      const lawSection = renderLawSection(result.lawReferences);
+      const empty = `<section class="state-panel state-no-result" data-state="NO_RESULT"><h2>NO_RESULT</h2>${rationale}</section>`;
+      return `<div class="fable-results" data-terminal-state="NO_RESULT">${query}${empty}${lawSection}<p class="disclaimer">본 결과는 법제처 국가법령정보 Open API 데이터를 기반으로 하며, 법률 자문이 아닙니다.</p></div>`;
+    }
     const empty = state === "NO_RESULT" && result.route === "direct" ? renderDirectMiss() : renderStateMessage(state);
     return `<div class="fable-results" data-terminal-state="${escapeHtml(state)}">${query}${empty}<p class="disclaimer">본 결과는 법제처 국가법령정보 Open API 데이터를 기반으로 하며, 법률 자문이 아닙니다.</p></div>`;
   }
 
   const items = (Array.isArray(result.items) ? result.items : []).filter((item) => item?.status === "verified");
-  const laws = [];
-  const seenLaws = new Set();
-  for (const law of result.lawReferences || []) {
-    const key = `${law?.lawName || ""}|${law?.article || ""}|${law?.link || ""}`;
-    if (seenLaws.has(key)) continue;
-    seenLaws.add(key);
-    const rendered = renderLawReference(law);
-    if (rendered) laws.push(rendered);
-  }
-  for (const item of items) {
-    for (const law of item.lawReferences || []) {
-      const key = `${law?.lawName || ""}|${law?.article || ""}|${law?.link || ""}`;
-      if (seenLaws.has(key)) continue;
-      seenLaws.add(key);
-      const rendered = renderLawReference(law);
-      if (rendered) laws.push(rendered);
-    }
-  }
+  const lawReferences = [
+    ...(result.lawReferences || []),
+    ...items.flatMap((item) => item.lawReferences || []),
+  ];
 
   const allRelated = items.length > 0 && items.every((item) => item.match === "related");
   const caseHeading = items.length === 0
@@ -118,7 +125,7 @@ export function renderResults(result = {}) {
   const cases = items.length > 0
     ? items.map(renderCase).join("")
     : `<p class="empty">${escapeHtml(NO_RESULT_MESSAGE)}</p>`;
-  const lawSection = laws.length > 0 ? `<section class="result-section"><h2>관련 법규</h2><ul class="law-list">${laws.join("")}</ul></section>` : "";
+  const lawSection = renderLawSection(lawReferences);
   const intro = result.intro ? `<p class="intro">${textBlock(result.intro)}</p>` : "";
   const fallback = result.fallbackLabel ? `<p class="notice">${escapeHtml(result.fallbackLabel)}</p>` : "";
   const ignored = result.ignoredCaseCount > 0

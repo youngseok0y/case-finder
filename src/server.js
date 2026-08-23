@@ -13,11 +13,18 @@ import { createProgressReporter } from "./progress.js";
 import { defaultSearchAdapterRegistry } from "./searchAdapters/registry.js";
 import { toResultContract } from "./searchAdapters/resultContract.js";
 import { validateDirectResult, validateNaturalResult } from "./validator.js";
-import { inspectPackagedCodexRuntime } from "./lunaSdkRuntime.js";
+import {
+  closeDefaultCodexAppServerRuntime,
+  getDefaultCodexAppServerRuntime,
+} from "./codexAppServerRuntime.js";
+import {
+  closeDefaultCodexAccountManager,
+  getDefaultCodexAccountManager,
+} from "./codexAccount.js";
 import { adminSettingsView, validateAdminPatch, writeAdminSettings } from "./adminConfig.js";
 import {
+  LUNA_APP_SERVER_RUNTIME_MESSAGE,
   LUNA_AUTH_REQUIRED_MESSAGE,
-  LUNA_SDK_RUNTIME_MESSAGE,
   LUNA_RUNTIME_ERROR_MESSAGE,
   PRODUCT_SERVICE,
 } from "./productMessages.js";
@@ -102,7 +109,42 @@ function adapterLabel(adapter) {
   return adapter === "gemini_d" ? "Gemini 빠른 검색" : "Luna 고정밀 검색";
 }
 
-async function quotaStatus() {
+function codexWeeklyApiView(weekly) {
+  return {
+    available: weekly?.available === true,
+    usedPercent: Number.isFinite(Number(weekly?.usedPercent)) ? Math.min(100, Math.max(0, Number(weekly.usedPercent))) : null,
+    remainingPercent: Number.isFinite(Number(weekly?.remainingPercent)) ? Math.min(100, Math.max(0, Number(weekly.remainingPercent))) : null,
+    resetLabel: typeof weekly?.resetLabel === "string" ? weekly.resetLabel : "",
+  };
+}
+
+function codexAccountApiView(account) {
+  return {
+    loggedIn: account?.loggedIn === true,
+    requiresOpenaiAuth: account?.requiresOpenaiAuth === true,
+    email: typeof account?.email === "string" ? account.email : "",
+    planType: typeof account?.planType === "string" ? account.planType : "unknown",
+    type: typeof account?.type === "string" ? account.type : "",
+    authMode: typeof account?.authMode === "string" ? account.authMode : "unknown",
+    codexWeekly: codexWeeklyApiView(account?.codexWeekly),
+    pendingLogin: account?.pendingLogin === true,
+  };
+}
+
+function codexWeeklyHealthView(account) {
+  const weekly = codexWeeklyApiView(account?.codexWeekly);
+  const loggedIn = account?.loggedIn === true;
+  return {
+    loggedIn,
+    available: loggedIn && weekly.available === true,
+    remainingPercent: loggedIn ? weekly.remainingPercent : null,
+  };
+}
+
+async function quotaStatus({
+  codexAccountManagerImpl = getDefaultCodexAccountManager,
+  codexRuntimeImpl = getDefaultCodexAppServerRuntime,
+} = {}) {
   let gemini;
   try {
     const usage = await readGeminiUsage();
@@ -116,32 +158,52 @@ async function quotaStatus() {
   } catch {
     gemini = { label: "Gemini 사용량 확인 불가", source: "unavailable" };
   }
+  let codexWeekly = { loggedIn: false, available: false, remainingPercent: null };
+  try {
+    codexWeekly = codexWeeklyHealthView(await codexAccountManagerImpl().read());
+  } catch {
+    // Health remains available when app-server account/quota is unavailable.
+  }
   return {
     gemini,
-    luna: { label: "Luna 사용량 확인 불가", source: "unavailable" },
+    codexWeekly,
   };
 }
 
-async function healthPayload() {
-  let luna = { configured: false, codexAvailable: false, codeModeHostAvailable: false, version: "" };
+async function healthPayload({
+  codexAccountManagerImpl = getDefaultCodexAccountManager,
+  codexRuntimeImpl = getDefaultCodexAppServerRuntime,
+} = {}) {
+  let luna = {
+    configured: false,
+    codexAvailable: false,
+    codeModeHostAvailable: false,
+    transport: "app_server",
+    dynamicTools: false,
+    version: "",
+  };
   if (config.searchAdapter === "luna_native") {
     try {
-      const runtime = await inspectPackagedCodexRuntime();
+      const runtime = await codexRuntimeImpl().inspect();
       luna = {
         configured: true,
-        codexAvailable: runtime.executable,
-        codeModeHostAvailable: runtime.host,
-        version: "sdk-packaged",
+        codexAvailable: runtime.available,
+        codeModeHostAvailable: false,
+        transport: runtime.transport,
+        dynamicTools: runtime.dynamicTools,
+        version: runtime.version,
         package: runtime.packageName,
-        target: runtime.triple,
+        target: runtime.target,
       };
     } catch (error) {
       luna = {
         configured: true,
         codexAvailable: false,
         codeModeHostAvailable: false,
+        transport: "app_server",
+        dynamicTools: false,
         version: "",
-        errorCode: error.code || "CODEX_SDK_RUNTIME_UNAVAILABLE",
+        errorCode: error.code || "CODEX_APP_SERVER_RUNTIME_UNAVAILABLE",
       };
     }
   }
@@ -152,8 +214,9 @@ async function healthPayload() {
     expectedNode: EXPECTED_NODE_VERSION,
     adapter: { id: config.searchAdapter, label: adapterLabel(config.searchAdapter) },
     mcp: getMcpStatus(),
+    codex: { ...luna, transport: "app_server" },
     luna,
-    quota: await quotaStatus(),
+    quota: await quotaStatus({ codexAccountManagerImpl, codexRuntimeImpl }),
   };
 }
 
@@ -240,13 +303,24 @@ function errorCode(error) {
 
 function runtimeFailure(error) {
   return config.searchAdapter === "luna_native" && [
-    "CODEX_SDK_RUNTIME_UNAVAILABLE",
-    "CODEX_SDK_PLATFORM_UNSUPPORTED",
-    "CODEX_SDK_EXECUTION_FAILED",
-    "CODEX_SDK_TURN_FAILED",
-    "CODEX_SDK_STREAM_FAILED",
-    "CODEX_SDK_FINAL_MISSING",
-    "CODEX_SDK_FINAL_INVALID",
+    "CODEX_APP_SERVER_RUNTIME_UNAVAILABLE",
+    "CODEX_APP_SERVER_PLATFORM_UNSUPPORTED",
+    "CODEX_APP_SERVER_SPAWN_FAILED",
+    "CODEX_APP_SERVER_INITIALIZE_FAILED",
+    "CODEX_APP_SERVER_PROCESS_FAILED",
+    "CODEX_APP_SERVER_PROCESS_CLOSED",
+    "CODEX_APP_SERVER_REQUEST_FAILED",
+    "CODEX_APP_SERVER_METHOD_UNSUPPORTED",
+    "CODEX_APP_SERVER_REQUEST_TIMEOUT",
+    "CODEX_APP_SERVER_THREAD_START_FAILED",
+    "CODEX_APP_SERVER_THREAD_ID_MISSING",
+    "CODEX_APP_SERVER_TURN_START_FAILED",
+    "CODEX_APP_SERVER_TURN_ID_MISSING",
+    "CODEX_APP_SERVER_TURN_FAILED",
+    "CODEX_APP_SERVER_TURN_TIMEOUT",
+    "CODEX_APP_SERVER_FINAL_INVALID",
+    "CODEX_APP_SERVER_TOOL_CALL_UNKNOWN",
+    "CODEX_APP_SERVER_PROTOCOL_CONTAMINATION",
     "CODEX_NATIVE_SESSION_TIMEOUT",
     "CODEX_NATIVE_SESSION_ENDED_WITHOUT_FINAL",
     "CODEX_NATIVE_FINAL_MISSING",
@@ -260,10 +334,33 @@ function errorPayload(error) {
   if (runtimeFailure(error)) {
     const message = {
       CODEX_AUTH_REQUIRED: LUNA_AUTH_REQUIRED_MESSAGE,
-    }[code] || (code.startsWith("CODEX_SDK_") ? LUNA_SDK_RUNTIME_MESSAGE : LUNA_RUNTIME_ERROR_MESSAGE);
+    }[code] || (code.startsWith("CODEX_APP_SERVER_") ? LUNA_APP_SERVER_RUNTIME_MESSAGE : LUNA_RUNTIME_ERROR_MESSAGE);
     return { status: 503, payload: { ok: false, terminalState: "LUNA_RUNTIME_UNAVAILABLE", message } };
   }
   return { status: 500, payload: { ok: false, terminalState: "NETWORK_SERVER_ERROR", message: "검색 처리 중 오류가 발생했습니다." } };
+}
+
+function codexApiErrorPayload(error) {
+  const code = errorCode(error);
+  if (code === "CODEX_LOGIN_TYPE_UNSUPPORTED") {
+    return { status: 400, payload: { ok: false, code, message: "지원하지 않는 Codex 로그인 방식입니다." } };
+  }
+  if (code === "CODEX_AUTH_REQUIRED") {
+    return { status: 503, payload: { ok: false, code, message: LUNA_AUTH_REQUIRED_MESSAGE } };
+  }
+  if (String(code).startsWith("CODEX_")) {
+    return { status: 503, payload: { ok: false, code, message: LUNA_APP_SERVER_RUNTIME_MESSAGE } };
+  }
+  return { status: 500, payload: { ok: false, code: "CODEX_API_FAILED", message: "Codex 상태를 확인하지 못했습니다." } };
+}
+
+function sendCodexApiError(response, error) {
+  if (Number.isInteger(error?.status)) {
+    sendJson(response, error.status, { ok: false, code: error.code || "CODEX_API_REQUEST_INVALID", message: error.message });
+    return;
+  }
+  const failure = codexApiErrorPayload(error);
+  sendJson(response, failure.status, failure.payload);
 }
 
 function requestLocalPort(request) {
@@ -362,6 +459,8 @@ export function createRequestHandler({
   adminSettingsViewImpl = adminSettingsView,
   validateAdminPatchImpl = validateAdminPatch,
   writeAdminSettingsImpl = writeAdminSettings,
+  codexRuntimeImpl = getDefaultCodexAppServerRuntime,
+  codexAccountManagerImpl = getDefaultCodexAccountManager,
 } = {}) {
   return (request, response) => {
   void (async () => {
@@ -381,6 +480,71 @@ export function createRequestHandler({
     }
     if (request.method === "GET" && url.pathname === "/admin/config") {
       sendJson(response, 200, { ok: true, ...adminSettingsViewImpl() });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/codex/usage") {
+      try {
+        sendJson(response, 200, { ok: true, ...(await codexRuntimeImpl().usageSnapshot()) });
+      } catch (error) {
+        sendCodexApiError(response, error);
+      }
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/codex/account") {
+      try {
+        sendJson(response, 200, { ok: true, ...codexAccountApiView(await codexAccountManagerImpl().read()) });
+      } catch (error) {
+        sendCodexApiError(response, error);
+      }
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/codex/rate-limits") {
+      try {
+        const limits = await codexAccountManagerImpl().readRateLimits();
+        sendJson(response, 200, { ok: true, source: "app_server", codexWeekly: codexWeeklyApiView(limits?.codexWeekly) });
+      } catch (error) {
+        sendCodexApiError(response, error);
+      }
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/codex/login/start") {
+      if (!sameOrigin(request)) {
+        sendJson(response, 403, { ok: false, message: "Codex 로그인은 같은 출처에서만 시작할 수 있습니다." });
+        return;
+      }
+      try {
+        const body = await parseJsonBody(request);
+        const result = await codexAccountManagerImpl().startLogin(body?.type || "chatgpt");
+        sendJson(response, 200, { ok: true, ...result });
+      } catch (error) {
+        sendCodexApiError(response, error);
+      }
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/codex/login/cancel") {
+      if (!sameOrigin(request)) {
+        sendJson(response, 403, { ok: false, message: "Codex 로그인 취소는 같은 출처에서만 요청할 수 있습니다." });
+        return;
+      }
+      try {
+        const body = await parseJsonBody(request);
+        const result = await codexAccountManagerImpl().cancelLogin(body?.loginId || "");
+        sendJson(response, 200, { ok: true, ...result });
+      } catch (error) {
+        sendCodexApiError(response, error);
+      }
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/codex/logout") {
+      if (!sameOrigin(request)) {
+        sendJson(response, 403, { ok: false, message: "Codex 로그아웃은 같은 출처에서만 요청할 수 있습니다." });
+        return;
+      }
+      try {
+        sendJson(response, 200, { ok: true, ...(await codexAccountManagerImpl().logout()) });
+      } catch (error) {
+        sendCodexApiError(response, error);
+      }
       return;
     }
     if (request.method === "POST" && url.pathname === "/admin/config") {
@@ -444,29 +608,33 @@ server.on("error", (error) => {
 });
 
 if (isMainModule) {
-process.on("SIGINT", () => {
-  server.close(async () => {
-    await closeMcp();
-    process.exit(0);
+  process.on("SIGINT", () => {
+    server.close(async () => {
+      closeDefaultCodexAccountManager();
+      await closeDefaultCodexAppServerRuntime();
+      await closeMcp();
+      process.exit(0);
+    });
   });
-});
 
-process.on("SIGTERM", () => {
-  server.close(async () => {
-    await closeMcp();
-    process.exit(0);
+  process.on("SIGTERM", () => {
+    server.close(async () => {
+      closeDefaultCodexAccountManager();
+      await closeDefaultCodexAppServerRuntime();
+      await closeMcp();
+      process.exit(0);
+    });
   });
-});
 
-try {
-  await startMcp({ probe: true });
-} catch (error) {
-  await logError("MCP 서버 기동 실패", error);
-}
+  try {
+    await startMcp({ probe: true });
+  } catch (error) {
+    await logError("MCP 서버 기동 실패", error);
+  }
 
-server.listen(config.port, "127.0.0.1", () => {
-  logInfo(`http://localhost:${config.port} 에서 실행 중입니다.`);
-});
+  server.listen(config.port, "127.0.0.1", () => {
+    logInfo(`http://localhost:${config.port} 에서 실행 중입니다.`);
+  });
 
 }
 

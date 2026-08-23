@@ -1,5 +1,5 @@
 import { createAgenticSearchV2 } from "../aoV2/index.js";
-import { createCodexSdkSessionFactory } from "../lunaSdkRuntime.js";
+import { createCodexAppServerSessionFactory } from "../codexAppServerRuntime.js";
 import { enrichLawReferences, lawDetailLink, parseStatuteReferences } from "../directLookup.js";
 import { config } from "../../config.js";
 import { toResultContract } from "./resultContract.js";
@@ -8,10 +8,11 @@ export const LUNA_NATIVE_EXECUTION_PIN = Object.freeze({
   adapterId: "luna_native",
   provider: "codex_luna",
   architecture: "AO_V2_NATIVE",
-  runtime: "codex_sdk",
+  runtime: "codex_app_server",
+  toolTransport: "dynamic_tools",
   model: config.codexModel,
   reasoningEffort: config.codexReasoningEffort,
-  persistence: "adapter_scoped",
+  persistence: "runtime_scoped",
 });
 
 function buildLunaLawReferences(result) {
@@ -141,6 +142,7 @@ export function buildLunaResultItems(result = {}, ledger = null) {
         court: candidate.court || "",
         date: candidate.date || "",
         sections: candidate.sections || {},
+        rawText: candidate.rawText || "",
       },
       lawReferences: [],
       match: selection?.match || "related",
@@ -153,7 +155,7 @@ export function createLunaNativeAdapter({
   createSearch = (options) => createAgenticSearchV2({
     ...options,
     provider: "codex_luna",
-    adapterOptions: { createSession: createCodexSdkSessionFactory(), ...(options.adapterOptions || {}) },
+    adapterOptions: { createSession: createCodexAppServerSessionFactory(), ...(options.adapterOptions || {}) },
   }),
 } = {}) {
   const persistentSearch = run ? null : createSearch({ provider: "codex_luna" });

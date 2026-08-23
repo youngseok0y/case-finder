@@ -27,6 +27,25 @@ function evidenceCaseKey(value) {
   return canonicalCaseIdentity(value) || normalizeCaseNumber(value);
 }
 
+export function providerBoundCaseIdentityCompatibility(observedCase, detailCase) {
+  const observed = parseProviderCompoundCaseNumber(observedCase);
+  const detail = parseProviderCompoundCaseNumber(detailCase);
+  if (observed.ambiguous || detail.ambiguous) return "mismatch";
+  if (caseIdentityMatches(observedCase, detailCase)) return "exact";
+  const observedMembers = new Set(observed.canonicalMembers);
+  const detailMembers = new Set(detail.canonicalMembers);
+  if (observedMembers.size === 0 || detailMembers.size === 0) return "mismatch";
+  if ([...observedMembers].every((member) => detailMembers.has(member))) return "provider_compound_expansion";
+  return "mismatch";
+}
+
+function normalizeLawArticle(value) {
+  const source = text(value).replace(/\s+/gu, "");
+  const match = source.match(/^(?:제)?(\d{1,4})조(?:의(\d{1,2}))?/u);
+  if (!match) return "";
+  return `제${Number.parseInt(match[1], 10)}조${match[2] ? `의${Number.parseInt(match[2], 10)}` : ""}`;
+}
+
 export function parseProviderCompoundCaseNumber(value) {
   const rawCaseNumber = rawCaseNumberOf(value);
   if (!rawCaseNumber) return { rawCaseNumber: "", canonicalMembers: [], acceptedEvidenceKeys: [], ambiguous: true };
@@ -169,6 +188,7 @@ export class EvidenceLedger {
           title: "",
           id: "",
           sections: {},
+          rawText: "",
           selectedAttempts: [],
         };
         this.cases.set(key, candidate);
@@ -226,15 +246,16 @@ export class EvidenceLedger {
     candidate.date ||= text(detail.date);
     candidate.sections = { ...candidate.sections, ...(detail.sections || {}) };
     const parsed = parseProviderCompoundCaseNumber(rawDetailCaseNumber);
-    const exactCase = caseIdentityMatches(candidate.rawCaseNumber || candidate.caseNumber, rawDetailCaseNumber);
+    const identityCompatibility = providerBoundCaseIdentityCompatibility(candidate.rawCaseNumber || candidate.caseNumber, rawDetailCaseNumber);
     const sameProviderProvenance = Boolean(requestedId && candidate.providerIds.includes(requestedId));
-    candidate.detailVerified = Boolean(verified && sameProviderProvenance && exactCase && text(rawText) && !parsed.ambiguous);
+    candidate.rawText ||= text(rawText);
+    candidate.detailVerified = Boolean(verified && sameProviderProvenance && identityCompatibility !== "mismatch" && text(rawText) && !parsed.ambiguous);
     if (candidate.detailVerified) {
       mergeProviderCaseEvidence(candidate, rawDetailCaseNumber);
     } else {
       const code = !sameProviderProvenance
         ? (requestedId ? "DETAIL_PROVIDER_PROVENANCE_MISMATCH" : "DETAIL_PROVIDER_PROVENANCE_MISSING")
-        : !exactCase
+        : identityCompatibility === "mismatch"
           ? "DETAIL_IDENTITY_MISMATCH"
           : !text(rawText)
             ? "DETAIL_TEXT_MISSING"
@@ -266,6 +287,7 @@ export class EvidenceLedger {
       detail_provider_id: requestedId,
       matched_provider_id: candidate.id || "",
       same_provider_provenance: sameProviderProvenance,
+      identity_compatibility: identityCompatibility,
       verified: candidate.detailVerified,
       verification_code: candidate.detailVerified ? "" : candidate.verificationFailures?.at(-1)?.code || "DETAIL_NOT_VERIFIED",
     });
@@ -294,6 +316,7 @@ export class EvidenceLedger {
           observed: true,
           searchQueries: [],
           textOpened: false,
+          openedArticles: [],
         };
         this.laws.set(key, law);
         added += 1;
@@ -304,14 +327,27 @@ export class EvidenceLedger {
     return { added, observed: items.length || 0 };
   }
 
-  recordLawText({ mst = "", lawId = "", textOpened = true } = {}) {
+  recordLawText({ mst = "", lawId = "", jo = "", textOpened = true } = {}) {
     const targetMst = text(mst);
     const targetLawId = text(lawId);
     const law = [...this.laws.values()].find((item) =>
       (targetMst && item.mst === targetMst) || (targetLawId && item.lawId === targetLawId));
     if (!law) return { verified: false, reason: "LAW_NOT_OBSERVED" };
     law.textOpened = Boolean(textOpened);
+    const article = normalizeLawArticle(jo);
+    if (law.textOpened && article) uniquePush(law.openedArticles, article);
     return { verified: law.textOpened, reason: law.textOpened ? "" : "LAW_TEXT_NOT_OPENED" };
+  }
+
+  isLawArticleOpened({ mst = "", lawId = "", jo = "", article = "" } = {}) {
+    const targetMst = text(mst);
+    const targetLawId = text(lawId);
+    const targetArticle = normalizeLawArticle(jo || article);
+    if (!targetArticle) return false;
+    return [...this.laws.values()].some((item) =>
+      ((!targetMst && !targetLawId) || (targetMst && item.mst === targetMst) || (targetLawId && item.lawId === targetLawId))
+      && (item.openedArticles || []).includes(targetArticle),
+    );
   }
 
   isDecisionIdObserved(domain, id) {
@@ -425,7 +461,11 @@ export class EvidenceLedger {
         selectedAttempts: item.selectedAttempts.map((attempt) => ({ ...attempt })),
         verificationFailures: (item.verificationFailures || []).map((failure) => ({ ...failure })),
       })),
-      laws: [...this.laws.values()].map((item) => ({ ...item, searchQueries: [...item.searchQueries] })),
+      laws: [...this.laws.values()].map((item) => ({
+        ...item,
+        searchQueries: [...item.searchQueries],
+        openedArticles: [...(item.openedArticles || [])],
+      })),
       selectionAttempts: this.selectionAttempts.map((attempt) => attempt.map((item) => ({ ...item }))),
       verificationFailures: this.verificationFailures.map((failure) => ({ ...failure })),
       searchTraces: this.searchTraces.map((trace) => ({

@@ -1,10 +1,10 @@
 import { logValidation } from "./log.js";
+import { normalizeLawArticle, sanitizeEvidenceNarrative } from "./aoV2/finalSelectionGate.js";
 import { deriveTerminalState } from "./searchAdapters/resultContract.js";
 import { SAFETY_REJECTED_MESSAGE } from "./productMessages.js";
 import {
   caseNumberKey,
   caseNumberMatches,
-  extractCaseNumbers,
   caseNumberIncludes,
   normalizeCaseNumber,
 } from "./router.js";
@@ -71,6 +71,7 @@ export async function validateNaturalResult(result) {
     else if (selection.match !== "direct" && selection.match !== "related") reason = "선별 결과의 match 값이 올바르지 않습니다.";
     else if (!item || item.status !== "verified") reason = "상세 조회에 성공하지 못한 사건번호입니다.";
     else if (!caseNumberMatches(item.detail?.caseNumber, caseNumber)) reason = "전문 조회 사건번호가 후보값과 일치하지 않습니다.";
+    else if (!item.detail?.rawText) reason = "전문 조회 원문이 비어 있습니다.";
     else if (seen.has(caseNumberKey(caseNumber))) reason = "중복 사건번호가 선별되었습니다.";
 
     if (reason) {
@@ -83,17 +84,36 @@ export async function validateNaturalResult(result) {
     validItems.push({ ...item, match: selection.match });
   }
 
-  let intro = typeof result.intro === "string" ? result.intro.trim() : "";
-  if (intro && (extractCaseNumbers(intro).length > 0 || /제\d+조(?:의\d+)?/.test(intro))) {
-    await logValidation(result.query, "(intro)", "intro에 사건번호 또는 조문번호가 포함되어 제거했습니다.");
-    intro = "";
+  const narrative = sanitizeEvidenceNarrative(result.intro, {
+    isCaseVerified: (caseNumber) => validItems.some((item) =>
+      item.status === "verified"
+      && caseNumberMatches(item.caseNumber, caseNumber)
+      && Boolean(item.detail?.rawText),
+    ),
+    isLawArticleOpened: (article) => {
+      const normalizedArticle = normalizeLawArticle(article);
+      return (result.lawReferences || []).some((reference) =>
+        normalizeLawArticle(reference?.article) === normalizedArticle
+        && Boolean(reference?.lawName)
+        && Boolean(reference?.text),
+      );
+    },
+  });
+  for (const diagnostic of narrative.diagnostics) {
+    await logValidation(result.query, "(intro)", diagnostic.code);
   }
+  const protocolDiagnostics = [
+    ...(Array.isArray(result.protocolDiagnostics) ? result.protocolDiagnostics : []),
+    ...narrative.diagnostics,
+  ];
   return {
     ...result,
-    intro,
+    intro: narrative.text,
     selected: validSelections,
     items: validItems,
     validationFailures: failures,
+    protocolDiagnostics,
+    selectionRepaired: Boolean(result.selectionRepaired || narrative.sanitized),
     terminalState: deriveTerminalState({ ...result, validationFailures: failures }, result.outputValid !== false, validItems),
   };
 }

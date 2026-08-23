@@ -42,7 +42,7 @@ test("natural result validation preserves verified-only output and terminal stat
     ],
     candidateCaseNumbers: ["2020다1234", "2020다9999"],
     items: [
-      { status: "verified", caseNumber: "2020다1234", detail: { caseNumber: "2020다1234" } },
+      { status: "verified", caseNumber: "2020다1234", detail: { caseNumber: "2020다1234", rawText: "provider decision text" } },
       { status: "validation_failed", caseNumber: "2020다9999", detail: { caseNumber: "2020다9999" } },
     ],
   }, { adapterId: "gemini_d", provider: "gemini", architecture: "D" });

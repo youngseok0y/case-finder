@@ -17,7 +17,7 @@
   "dependencies": {
     "@google/genai": "2.13.0",
     "@modelcontextprotocol/sdk": "1.30.0",
-    "@openai/codex-sdk": "0.147.0",
+    "@openai/codex": "0.147.0",
     "dotenv": "17.4.2",
     "korean-law-mcp": "4.9.6"
   }

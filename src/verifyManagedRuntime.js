@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { inspectPackagedCodexRuntime } from "./lunaSdkRuntime.js";
+import { inspectPackagedCodexAppServerRuntime } from "./codexAppServerRuntime.js";
 import { resolveRuntimePaths } from "./runtimePaths.js";
 
 const GOLDEN_QUERY = "임차보증금을 돌려받지 못했을 때";
@@ -29,6 +30,39 @@ function versionOf(command, args) {
     return execFileSync(command, args, { encoding: "utf8", windowsHide: true, timeout: 15_000 }).trim();
   } catch (error) {
     fail("MANAGED_VERSION_CHECK_FAILED", `${command}:${error.message}`);
+  }
+}
+
+function verifyAppServerCapabilities(runtime) {
+  try {
+    const help = execFileSync(runtime.executablePath, ["app-server", "--help"], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 15_000,
+    });
+    if (!/app-server/iu.test(help)) fail("CODEX_APP_SERVER_CAPABILITY_MISSING", "app-server help did not advertise app-server");
+
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "case-finder-app-server-schema-"));
+    try {
+      execFileSync(runtime.executablePath, ["app-server", "generate-json-schema", "--experimental", "--out", temporaryRoot], {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: 30_000,
+      });
+      const schema = fs.readdirSync(temporaryRoot, { recursive: true })
+        .map((entry) => path.join(temporaryRoot, String(entry)))
+        .filter((entry) => fs.statSync(entry).isFile())
+        .map((entry) => fs.readFileSync(entry, "utf8"))
+        .join("\n");
+      for (const marker of ["dynamicTools", "DynamicToolSpec", "item/tool/call", "account/read"]) {
+        if (!schema.includes(marker)) fail("CODEX_APP_SERVER_DYNAMIC_TOOLS_UNSUPPORTED", `schema marker missing:${marker}`);
+      }
+    } finally {
+      fs.rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  } catch (error) {
+    if (error?.code?.startsWith("CODEX_APP_SERVER_")) throw error;
+    fail("CODEX_APP_SERVER_DYNAMIC_TOOLS_UNSUPPORTED", error.message);
   }
 }
 
@@ -114,7 +148,8 @@ async function main() {
   requiredFile(paths.serverPath, "server");
 
   const nodeVersion = versionOf(paths.managedNodePath, ["--version"]);
-  const sdkRuntime = await inspectPackagedCodexRuntime({ platform: "win32", arch: "x64" });
+  const appServerRuntime = await inspectPackagedCodexAppServerRuntime({ platform: "win32", arch: "x64" });
+  verifyAppServerCapabilities(appServerRuntime);
 
   const port = Number.parseInt(optionValue("--port") || process.env.M9RR3_VERIFY_PORT || "3311", 10);
   const query = optionValue("--query") || GOLDEN_QUERY;
@@ -140,11 +175,11 @@ async function main() {
     if (health.mcp?.connected !== true) fail("MANAGED_MCP_STARTUP_FAILED", "restricted MCP is not connected");
     const result = process.argv.includes("--skip-query") ? null : await runGoldenQuery(port, query);
     console.log(JSON.stringify({
-      status: "M10R_CODEX_SDK_PASS",
+      status: "M11_CODEX_APP_SERVER_PASS",
       installRoot,
       nodeVersion,
-      sdkRuntime,
-      health: { status: 200, mcpConnected: health.mcp.connected, luna: health.luna },
+      appServerRuntime,
+      health: { status: 200, mcpConnected: health.mcp.connected, codex: health.codex, luna: health.luna },
       golden: result,
     }));
   } finally {
@@ -154,7 +189,7 @@ async function main() {
 
 main().catch((error) => {
   console.error(JSON.stringify({
-    status: "M10R_CODEX_SDK_BLOCKED",
+    status: "M11_CODEX_APP_SERVER_BLOCKED",
     code: error.code || "MANAGED_RUNTIME_VERIFICATION_FAILED",
     message: error.message,
   }));

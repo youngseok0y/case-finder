@@ -64,7 +64,7 @@ test("common envelope keeps controls, mismatch, and compound identity safe", () 
     observedCaseNumber: "2020므13562",
     returnedCaseNumber: compound,
     id: "single-to-compound",
-  }).result.verified, false);
+  }).result.verified, true);
   assert.equal(replayDetail({
     observedCaseNumber: compound,
     returnedCaseNumber: compound,

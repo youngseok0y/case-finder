@@ -30,7 +30,27 @@
           <div class="form-actions"><button class="primary-button" type="submit">설정 저장</button><span id="form-message" class="form-message" role="status"></span></div>
         </form>
       </section>
-      <section class="status-card"><p class="eyebrow">RUNTIME</p><h2>설치 runtime</h2><p class="helper-text">제품 설치본은 managed Codex를 우선 사용합니다. 개발자용 CLI 경로 override는 이 화면에 노출하지 않습니다.</p></section>
+      <section class="status-card" aria-labelledby="codex-heading">
+        <p class="eyebrow">CODEX ACCOUNT</p>
+        <h2 id="codex-heading">Codex 계정</h2>
+        <p class="helper-text">인증과 quota 상태는 Codex app-server가 관리합니다. Case Finder는 token이나 auth.json을 저장하거나 표시하지 않습니다.</p>
+        <div id="codex-status" class="helper-text" role="status">상태 확인 중…</div>
+        <div class="form-actions">
+          <button id="codex-browser-login" class="primary-button" type="button">GPT 계정 변경</button>
+          <button id="codex-device-login" type="button">Device code 로그인</button>
+          <button id="codex-cancel-login" type="button">로그인 취소</button>
+          <button id="codex-logout" type="button">로그아웃</button>
+          <button id="codex-refresh" type="button">새로고침</button>
+        </div>
+        <p id="codex-login-message" class="form-message" role="status"></p>
+        <dl class="status-list">
+          <div><dt>로그인 계정</dt><dd id="codex-email">확인 중…</dd></div>
+          <div><dt>요금제</dt><dd id="codex-plan">확인 중…</dd></div>
+          <div><dt>Codex 주간 사용량</dt><dd id="codex-weekly">확인 중…</dd></div>
+          <div><dt>다음 초기화</dt><dd id="codex-reset">확인 중…</dd></div>
+        </dl>
+      </section>
+      <section class="status-card"><p class="eyebrow">RUNTIME</p><h2>설치 runtime</h2><p class="helper-text">제품 설치본은 packaged Codex app-server를 우선 사용합니다. 개발자용 CLI 경로 override는 이 화면에 노출하지 않습니다.</p></section>
     </main>
     <script type="module" src="/admin.js"></script>
   </body>

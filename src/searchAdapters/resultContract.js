@@ -44,6 +44,16 @@ function executionPin(result, metadata) {
   return metadata.executionPin || result.executionPin || result.execution_pin || null;
 }
 
+function modelResolution(result) {
+  const value = result.modelResolution || result.model_resolution;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return {
+    requestedModel: text(value.requestedModel || value.requested_model),
+    effectiveModel: text(value.effectiveModel || value.effective_model),
+    fallbackApplied: value.fallbackApplied === true || value.fallback_applied === true,
+  };
+}
+
 export function deriveTerminalState(result, outputValid, items) {
   if (!outputValid) return "SAFETY_REJECTED";
   if (result.error) return "SEARCH_FAILED";
@@ -87,6 +97,7 @@ export function toResultContract(result = {}, metadata = {}) {
     protocolDiagnostics: arrayOr(result.protocolDiagnostics || result.protocol_diagnostics),
     rejectedSelected: arrayOr(result.rejectedSelected || result.rejected_selected),
     executionPin: executionPin(result, metadata),
+    modelResolution: modelResolution(result),
     telemetry,
     terminalState: deriveTerminalState({ ...result, validationFailures }, outputValid, items),
     error: text(result.error),

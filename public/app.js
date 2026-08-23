@@ -11,6 +11,7 @@ const progressBar = document.querySelector("#progress-bar");
 const progressSteps = [...document.querySelectorAll("[data-progress-step]")];
 const serviceStatus = document.querySelector("#service-status");
 const refreshStatus = document.querySelector("#refresh-status");
+const toast = document.querySelector("#toast");
 
 const EVENT_RANK = {
   SEARCH_STARTED: 0,
@@ -20,6 +21,7 @@ const EVENT_RANK = {
   CANDIDATES_FOUND: 4,
   DETAIL_VERIFIED: 5,
   FINALIZING: 6,
+  MODEL_FALLBACK: 6,
   SEARCH_COMPLETE: 7,
   SEARCH_FAILED: 7,
 };
@@ -36,6 +38,8 @@ const TERMINAL_STATUS = Object.freeze({
 
 let searching = false;
 let lastProgressRank = -1;
+let fallbackToastShown = false;
+let fallbackToastTimer = null;
 
 function setStatus(message, state = "idle") {
   statusMessage.textContent = message;
@@ -70,6 +74,21 @@ function showFailure(payload) {
   const message = payload?.message || "검색 처리 중 오류가 발생했습니다.";
   result.innerHTML = `<section class="state-panel state-error"><h2>${payload?.terminalState || "검색 실패"}</h2><p>${escapeHtml(message)}</p></section>`;
   setStatus(message, "error");
+}
+
+function showFallbackToast(payload) {
+  if (fallbackToastShown
+    || payload?.fallbackApplied !== true
+    || payload?.requestedModel !== "gpt-5.6-luna"
+    || payload?.effectiveModel !== "gpt-5.6-terra"
+    || !toast) return;
+  fallbackToastShown = true;
+  toast.textContent = "Luna를 사용할 수 없어 Terra로 검색했어요.";
+  toast.hidden = false;
+  window.clearTimeout(fallbackToastTimer);
+  fallbackToastTimer = window.setTimeout(() => {
+    toast.hidden = true;
+  }, 7_000);
 }
 
 function showTerminalStatus(payload) {
@@ -117,6 +136,9 @@ async function consumeStream(response) {
         } else if (event === "SEARCH_FAILED") {
           failed = true;
           showFailure(payload);
+        } else if (event === "MODEL_FALLBACK") {
+          showFallbackToast(payload);
+          handleProgress(payload);
         } else {
           handleProgress(payload);
         }
@@ -141,6 +163,9 @@ async function submitSearch(event) {
   searchButton.disabled = true;
   searchButton.textContent = "검색 중…";
   resetProgress();
+  fallbackToastShown = false;
+  window.clearTimeout(fallbackToastTimer);
+  if (toast) toast.hidden = true;
   const timer = window.setTimeout(() => { progressPanel.hidden = false; }, 1000);
   setStatus("검색을 시작했습니다.", "loading");
   try {
@@ -166,8 +191,13 @@ function renderServiceStatus(payload) {
   if (!payload) return;
   const engine = payload.adapter?.label || "확인 불가";
   const law = payload.mcp?.connected ? "연결됨" : "연결 확인 필요";
-  const quota = payload.adapter?.id === "gemini_d" ? payload.quota?.gemini?.label : payload.quota?.luna?.label;
-  serviceStatus.innerHTML = `<div><span>검색 엔진</span><strong>${escapeHtml(engine)}</strong></div><div><span>법령 API</span><strong>${escapeHtml(law)}</strong></div><div><span>사용량</span><strong>${escapeHtml(quota || "확인 불가")}</strong></div>`;
+  const weekly = payload.quota?.codexWeekly || {};
+  const quota = weekly.loggedIn === false
+    ? "로그인 필요"
+    : weekly.available === true && Number.isFinite(Number(weekly.remainingPercent))
+      ? `${Math.max(0, Math.min(100, Number(weekly.remainingPercent)))}% 남음`
+      : "확인할 수 없음";
+  serviceStatus.innerHTML = `<div><span>검색 엔진</span><strong>${escapeHtml(engine)}</strong></div><div><span>법령 API</span><strong>${escapeHtml(law)}</strong></div><div><span>Codex 주간 사용량</span><strong>${escapeHtml(quota)}</strong></div>`;
 }
 
 async function loadServiceStatus() {
@@ -175,7 +205,7 @@ async function loadServiceStatus() {
     const response = await fetch("/health", { cache: "no-store" });
     renderServiceStatus(await response.json());
   } catch {
-    serviceStatus.innerHTML = "<div><span>검색 엔진</span><strong>상태 확인 불가</strong></div><div><span>법령 API</span><strong>상태 확인 불가</strong></div><div><span>사용량</span><strong>확인 불가</strong></div>";
+    serviceStatus.innerHTML = "<div><span>검색 엔진</span><strong>상태 확인 불가</strong></div><div><span>법령 API</span><strong>상태 확인 불가</strong></div><div><span>Codex 주간 사용량</span><strong>확인할 수 없음</strong></div>";
   }
 }
 

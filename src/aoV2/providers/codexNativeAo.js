@@ -3,13 +3,10 @@ import { normalizeLegalToolResult } from "../legalToolGateway.js";
 import { createSafetyController } from "../safety.js";
 import { createTelemetry } from "../telemetry.js";
 import { createCommonEvidenceEnvelope } from "../commonEvidenceEnvelope.js";
+import { LEGAL_TOOL_NAMES } from "../legalToolDefinitions.js";
+import { isLunaTerraFallback } from "../../codexAppServerRuntime.js";
 
-export const CODEX_NATIVE_ALLOWED_TOOLS = Object.freeze([
-  "search_decisions",
-  "get_decision_text",
-  "search_law",
-  "get_law_text",
-]);
+export const CODEX_NATIVE_ALLOWED_TOOLS = LEGAL_TOOL_NAMES;
 
 const FORBIDDEN_EVENT_TYPES = new Set([
   "shell",
@@ -86,7 +83,12 @@ export function createCodexNativeAo({
             verified: true,
           });
         } else if (name === "get_law_text") {
-          ledger.recordLawText({ mst: args?.mst, lawId: args?.lawId, textOpened: Boolean(normalized.rawText) });
+          ledger.recordLawText({
+            mst: args?.mst,
+            lawId: args?.lawId,
+            jo: args?.jo,
+            textOpened: Boolean(normalized.rawText),
+          });
         }
       };
       const session = await createSession({
@@ -167,6 +169,17 @@ export function createCodexNativeAo({
             });
             telemetry.setSessionId(event.session_id || event.sessionId || session?.sessionId || null);
             if (event.usage || event.elapsedMs) telemetry.recordModelTurn({ usage: event.usage || {}, elapsedMs: event.elapsedMs || 0 });
+            const modelResolution = event.modelResolution || null;
+            if (isLunaTerraFallback(modelResolution)) {
+              onProgress("MODEL_FALLBACK", {
+                candidateCount: ledger.snapshot().cases.filter((item) => item.discovered).length,
+                verifiedCount: ledger.snapshot().cases.filter((item) => item.detailVerified).length,
+                lawCount: ledger.snapshot().laws.filter((item) => item.observed).length,
+                fallbackApplied: true,
+                requestedModel: modelResolution.requestedModel,
+                effectiveModel: modelResolution.effectiveModel,
+              });
+            }
             const attempt = event.selection || event.value || event;
             const gated = evidenceEnvelope.finalizeSelection(attempt);
             evidenceEnvelope.recordSelectionDiagnostic({ selection: attempt, gated, continuationCount: 0 });
@@ -179,6 +192,7 @@ export function createCodexNativeAo({
               provider: "codex_luna",
               architecture: "AO_V2",
               ...gated,
+              modelResolution,
               ledger: ledger.snapshot(),
               telemetry: telemetry.snapshot(ledger),
               elapsed_ms: Date.now() - startedAt,

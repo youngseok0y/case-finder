@@ -1,5 +1,5 @@
 {
-  "version": "m10r-codex-sdk-v1",
+  "version": "m11-codex-app-server-v1",
   "installer_entrypoint": "CaseFinderSetup.exe",
   "install_root": "%LOCALAPPDATA%\\Fable\\CaseFinder",
   "layout": {
@@ -14,13 +14,14 @@
       "path": "runtime/node/node.exe",
       "range": ">=24.14.0 <25"
     },
-    "codex_sdk": {
+    "codex_app_server": {
       "release": "0.147.0",
-      "package": "@openai/codex-sdk",
-      "codex_package": "@openai/codex",
+      "package": "@openai/codex",
       "platform_package": "@openai/codex-win32-x64",
       "target": "x86_64-pc-windows-msvc",
-      "runtime_check": "src/lunaSdkRuntime.js inspectPackagedCodexRuntime"
+      "transport": "app_server",
+      "dynamic_tools": true,
+      "runtime_check": "src/codexRuntimeResolver.js resolvePackagedCodexRuntime"
     },
     "server": "app/src/server.js",
     "bind": "127.0.0.1",
@@ -57,14 +58,14 @@
   "runtime_dependencies": [
     "@google/genai",
     "@modelcontextprotocol/sdk",
-    "@openai/codex-sdk",
+    "@openai/codex",
     "dotenv",
     "korean-law-mcp"
   ],
   "notes": [
-    "The installer provisions the private Node runtime and the pinned Codex SDK plus platform package under app/node_modules/.",
+    "The installer provisions the private Node runtime and the pinned Codex app-server plus platform package under app/node_modules/.",
     "Final execution uses runtime/node/node.exe and never runs npm ci; dependencies are installed during packaging.",
-    "luna_native uses the SDK packaged runtime and preserves the user's existing Codex authentication source without copying auth files.",
+    "luna_native uses a persistent Codex app-server with fresh ephemeral query threads and preserves the user's existing Codex authentication source without copying auth files.",
     "The normal product path does not use CODEX_CLI_PATH, system PATH, WindowsApps discovery, or manual Codex binary placement."
   ]
 }

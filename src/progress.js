@@ -6,6 +6,7 @@ export const SEARCH_PROGRESS_EVENTS = Object.freeze([
   "CANDIDATES_FOUND",
   "DETAIL_VERIFIED",
   "FINALIZING",
+  "MODEL_FALLBACK",
   "SEARCH_COMPLETE",
   "SEARCH_FAILED",
 ]);
@@ -18,6 +19,7 @@ const EVENT_RANK = Object.freeze({
   CANDIDATES_FOUND: 4,
   DETAIL_VERIFIED: 5,
   FINALIZING: 6,
+  MODEL_FALLBACK: 6,
   SEARCH_COMPLETE: 7,
   SEARCH_FAILED: 7,
 });
@@ -30,6 +32,7 @@ const EVENT_PERCENT = Object.freeze({
   CANDIDATES_FOUND: 55,
   DETAIL_VERIFIED: 75,
   FINALIZING: 90,
+  MODEL_FALLBACK: 90,
   SEARCH_COMPLETE: 100,
   SEARCH_FAILED: 100,
 });
@@ -42,6 +45,7 @@ const EVENT_LABEL = Object.freeze({
   CANDIDATES_FOUND: "판례 후보를 찾고 있습니다.",
   DETAIL_VERIFIED: "판례 원문을 검증하고 있습니다.",
   FINALIZING: "검증된 결과를 정리하고 있습니다.",
+  MODEL_FALLBACK: "사용 가능한 모델로 검색을 이어가고 있습니다.",
   SEARCH_COMPLETE: "검색을 완료했습니다.",
   SEARCH_FAILED: "검색을 완료하지 못했습니다.",
 });
@@ -81,6 +85,9 @@ export function createProgressReporter(onProgress = () => {}) {
       candidateCount: count(details.candidateCount),
       verifiedCount: count(details.verifiedCount),
       lawCount: count(details.lawCount),
+      fallbackApplied: details.fallbackApplied === true,
+      requestedModel: safeText(details.requestedModel),
+      effectiveModel: safeText(details.effectiveModel),
     });
     onProgress(last);
     return last;
