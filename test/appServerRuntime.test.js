@@ -185,6 +185,36 @@ test("usage normalization accepts app-server camelCase snapshots without double 
   });
 });
 
+test("ChatGPT account remains logged in when OpenAI auth is required", () => {
+  const account = normalizeCodexAccount({
+    account: { type: "chatgpt", email: "user@example.com", planType: "free" },
+    requiresOpenaiAuth: true,
+  });
+  assert.equal(account.loggedIn, true);
+  assert.equal(account.authMode, "chatgpt");
+});
+
+test("API key account remains logged in when OpenAI auth is required", () => {
+  const account = normalizeCodexAccount({
+    account: { type: "apiKey" },
+    requiresOpenaiAuth: true,
+  });
+  assert.equal(account.loggedIn, true);
+  assert.equal(account.authMode, "apiKey");
+});
+
+test("missing account requires login when OpenAI auth is required", () => {
+  const account = normalizeCodexAccount({ account: null, requiresOpenaiAuth: true });
+  assert.equal(account.loggedIn, false);
+  assert.equal(account.authMode, "logged_out");
+});
+
+test("missing account reports authentication as not required", () => {
+  const account = normalizeCodexAccount({ account: null, requiresOpenaiAuth: false });
+  assert.equal(account.loggedIn, false);
+  assert.equal(account.authMode, "not_required");
+});
+
 test("account manager exposes only safe account and rate-limit metadata", async () => {
   const listeners = new Set();
   const calls = [];
@@ -195,7 +225,7 @@ test("account manager exposes only safe account and rate-limit metadata", async 
     },
     async request(method, params) {
       calls.push({ method, params });
-      if (method === "account/read") return { account: { email: "user@example.com", planType: "pro", type: "chatgpt", accessToken: "secret" }, requiresOpenaiAuth: false };
+      if (method === "account/read") return { account: { email: "user@example.com", planType: "pro", type: "chatgpt", accessToken: "secret" }, requiresOpenaiAuth: true };
       if (method === "account/rateLimits/read") return { rateLimits: { primary: { usedPercent: 12, windowDurationMins: 60, resetsAt: 123 } } };
       if (method === "account/login/start") return { type: params.type, loginId: "login-1", authUrl: "https://example.test/login" };
       return {};
@@ -211,7 +241,7 @@ test("account manager exposes only safe account and rate-limit metadata", async 
   assert.equal(limits.codexWeekly.available, false);
   assert.equal(login.loginId, "login-1");
   assert.equal(JSON.stringify(manager.snapshot()).includes("accessToken"), false);
-  assert.deepEqual(normalizeCodexAccount({ account: { type: "chatgpt", email: null }, requiresOpenaiAuth: false }).loggedIn, true);
+  assert.deepEqual(normalizeCodexAccount({ account: { type: "chatgpt", email: null }, requiresOpenaiAuth: true }).loggedIn, true);
   assert.equal(normalizeCodexRateLimits({ rateLimits: { primary: { usedPercent: 1 } } }).limits.primary.usedPercent, 1);
   assert.equal(calls.some((item) => item.method === "account/read"), true);
   manager.close();
@@ -283,7 +313,7 @@ test("account notifications invalidate stale state and refresh account plus week
       if (method === "account/read") {
         accountReads += 1;
         return loggedIn
-          ? { account: { email: "user@example.com", planType: "free", type: "chatgpt" }, requiresOpenaiAuth: false }
+          ? { account: { email: "user@example.com", planType: "free", type: "chatgpt" }, requiresOpenaiAuth: true }
           : { account: {}, requiresOpenaiAuth: true };
       }
       if (method === "account/rateLimits/read") {

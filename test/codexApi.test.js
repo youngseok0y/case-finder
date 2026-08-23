@@ -15,7 +15,7 @@ test("Codex account and usage routes expose safe app-server metadata", async () 
   const calls = [];
   const account = {
     loggedIn: true,
-    requiresOpenaiAuth: false,
+    requiresOpenaiAuth: true,
     email: "user@example.com",
     planType: "pro",
     type: "chatgpt",

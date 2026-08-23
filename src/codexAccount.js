@@ -71,13 +71,14 @@ function accountValue(result) {
   const email = text(raw.email);
   const planType = text(raw.planType || raw.plan_type) || "unknown";
   const type = text(raw.type);
+  const hasAccount = Boolean(type);
   return {
-    loggedIn: !requiresOpenaiAuth && Boolean(email || type),
+    loggedIn: hasAccount,
     requiresOpenaiAuth,
     email,
     planType,
     type,
-    authMode: requiresOpenaiAuth ? "logged_out" : (type || (email ? "chatgpt" : "unknown")),
+    authMode: hasAccount ? type : (requiresOpenaiAuth ? "logged_out" : "not_required"),
   };
 }
 
