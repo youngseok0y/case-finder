@@ -61,7 +61,8 @@ export function formatCodexResetLabel(value, timeZone = KST_TIME_ZONE) {
   }).formatToParts(date);
   const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
   if (!values.year || !values.month || !values.day || !values.dayPeriod || !values.hour || !values.minute) return "";
-  return `${values.year}년 ${values.month}월 ${values.day}일 ${values.dayPeriod} ${values.hour}:${values.minute}`;
+  const dayPeriod = values.dayPeriod === "AM" ? "오전" : values.dayPeriod === "PM" ? "오후" : values.dayPeriod;
+  return `${values.year}년 ${values.month}월 ${values.day}일 ${dayPeriod} ${values.hour}:${values.minute}`;
 }
 
 function accountValue(result) {
