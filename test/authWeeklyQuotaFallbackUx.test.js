@@ -110,8 +110,8 @@ test("Admin and Index operating UI consume weekly normalized fields only", async
     fs.readFile(path.join(ROOT, "public", "index.html"), "utf8"),
     fs.readFile(path.join(ROOT, "public", "app.js"), "utf8"),
   ]);
-  assert.match(adminHtml, /로그인 계정/u);
-  assert.match(adminHtml, /Codex 주간 사용량/u);
+  assert.match(adminHtml, /연결된 계정/u);
+  assert.match(adminHtml, /이번 주 사용량/u);
   assert.match(adminHtml, /다음 초기화/u);
   assert.doesNotMatch(adminHtml, /로컬 token usage/iu);
   assert.doesNotMatch(adminHtml, /rate limit/iu);

@@ -9,70 +9,59 @@
   </head>
   <body>
     <a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
-    <header class="site-header shell">
-      <div>
-        <p class="brand-kicker">판례 검색기</p>
-        <h1>Case Finder</h1>
-        <p class="subtitle">사건번호 또는 자연어 질문으로 판례·법령 원문을 찾아보세요.</p>
+    <header class="topbar">
+      <div class="shell topbar-row">
+        <p class="wordmark">Case Finder <span>· 판례 검색</span></p>
+        <a class="text-link" href="/admin">설정</a>
       </div>
-      <a class="text-link" href="/admin">설정</a>
-    </header>
-
-    <main id="main-content" class="shell">
-      <section class="status-card" aria-labelledby="status-heading">
-        <div class="section-heading compact-heading">
-          <div>
-            <p class="eyebrow">현재 연결 상태</p>
-            <h2 id="status-heading">검색 준비 상태</h2>
-          </div>
-          <button id="refresh-status" class="icon-button" type="button">새로고침</button>
-        </div>
-        <div id="service-status" class="status-grid" aria-live="polite">
+      <div class="shell statusbar">
+        <div id="service-status" class="status-inline" aria-live="polite">
           <div><span>검색 엔진</span><strong>확인 중…</strong></div>
           <div><span>법령 API</span><strong>확인 중…</strong></div>
           <div><span>Codex 주간 사용량</span><strong>확인 중…</strong></div>
         </div>
-      </section>
+        <button id="refresh-status" class="link-button" type="button">새로고침</button>
+      </div>
+    </header>
 
-      <section class="search-card" aria-labelledby="search-heading">
-        <p class="eyebrow">SEARCH</p>
-        <h2 id="search-heading">무엇을 찾아볼까요?</h2>
-        <p class="helper-text">사건번호 또는 자연어 법률 질문을 입력하면 provider 원문과 검증된 상세 결과를 보여드려요.</p>
+    <main id="main-content" class="shell">
+      <section class="hero" aria-labelledby="search-heading">
+        <h1 id="search-heading">사건번호나 상황을 그대로 적어보세요.</h1>
+        <p class="lede" id="query-example">법제처 원문으로 확인된 판례와 근거 법령만 보여드립니다.</p>
         <form id="ask-form" novalidate>
-          <label for="query">검색 질문</label>
-          <div class="search-row">
-            <input id="query" name="query" maxlength="10000" autocomplete="off" placeholder="사건번호 또는 법률 질문을 입력하세요" aria-describedby="query-example" required>
+          <label class="sr-only" for="query">검색 질문</label>
+          <div class="searchbox">
+            <input id="query" name="query" maxlength="10000" autocomplete="off" placeholder="예: 임차보증금을 돌려받지 못했을 때" aria-describedby="query-example" required>
             <button id="search-button" class="primary-button" type="submit">검색</button>
           </div>
-          <p id="query-example" class="field-hint">예: 임차보증금을 돌려받지 못했을 때</p>
         </form>
+        <div class="examples">
+          <span>이렇게 물어보세요</span>
+          <button class="chip" type="button" data-example="대법원 2020다12345">대법원 2020다12345</button>
+          <button class="chip" type="button" data-example="권고사직인데 실업급여를 받을 수 있나요">권고사직인데 실업급여를 받을 수 있나요</button>
+          <button class="chip" type="button" data-example="공사대금을 못 받았을 때 유치권">공사대금을 못 받았을 때 유치권</button>
+        </div>
       </section>
 
       <section id="search-status" class="search-status" aria-live="polite" aria-atomic="true">
-        <div class="status-line"><span id="status-dot" class="status-dot" aria-hidden="true"></span><strong id="status-message">질문을 입력해 주세요.</strong></div>
+        <p class="status-line"><span id="status-dot" class="status-dot" aria-hidden="true"></span><strong id="status-message">질문을 입력해 주세요.</strong></p>
         <div id="progress-panel" class="progress-panel" hidden>
-          <div class="progress-heading"><span id="progress-label">검색을 시작했습니다.</span><span id="progress-percent">0%</span></div>
-          <div class="progress-track" aria-hidden="true"><span id="progress-bar"></span></div>
-          <ul id="progress-steps" class="progress-steps">
-            <li data-progress-step="ANALYSIS_COMPLETE">질문 분석</li>
-            <li data-progress-step="LAW_EVIDENCE_UPDATED">관련 법령 확인</li>
-            <li data-progress-step="CANDIDATES_FOUND">판례 후보 검색</li>
-            <li data-progress-step="DETAIL_VERIFIED">판례 원문 검증</li>
-            <li data-progress-step="FINALIZING">결과 정리</li>
-          </ul>
+          <span id="progress-label">검색을 시작했습니다.</span>
+          <span class="progress-track" aria-hidden="true"><span id="progress-bar"></span></span>
+          <span id="progress-percent">0%</span>
         </div>
       </section>
 
       <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-      <section id="result" class="result-container" aria-label="검색 결과">
-        <div class="empty-state"><h2>검색 결과</h2><p>검색을 시작하면 검증된 판례와 관련 법규가 여기에 표시됩니다.</p></div>
+      <section id="result" class="result-area" aria-label="검색 결과">
+        <p class="empty-state">검색을 시작하면 검증된 판례와 관련 법규가 여기에 표시됩니다.</p>
       </section>
     </main>
 
     <footer class="site-footer shell">
+      <p>궁금한 판례는 원문 링크를 함께 열어보시면 더 자세히 확인하실 수 있어요.</p>
       <p>본 결과는 법제처 국가법령정보 Open API 데이터를 기반으로 하며, 법률 자문이 아닙니다.</p>
-      <p>원문 링크를 열어 실제 provider 자료를 함께 확인해 주세요.</p>
     </footer>
     <script type="module" src="/app.js"></script>
   </body>

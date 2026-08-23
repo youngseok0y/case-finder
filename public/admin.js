@@ -1,6 +1,6 @@
 const form = document.querySelector("#settings-form");
 const message = document.querySelector("#form-message");
-const fields = ["SEARCH_ADAPTER", "CODEX_TIMEOUT_MS", "PORT", "SEARCH_DISPLAY", "GCP_PROJECT_ID"];
+const fields = ["SEARCH_ADAPTER"];
 const codexStatus = document.querySelector("#codex-status");
 const codexEmail = document.querySelector("#codex-email");
 const codexPlan = document.querySelector("#codex-plan");
@@ -10,12 +10,12 @@ const codexLoginMessage = document.querySelector("#codex-login-message");
 
 function setMessage(text, isError = false) {
   message.textContent = text;
-  message.style.color = isError ? "#b42318" : "#667085";
+  message.style.color = isError ? "var(--danger)" : "var(--muted)";
 }
 
 function setConfigured(id, configured) {
   const element = document.querySelector(`#${id}`);
-  if (element) element.textContent = configured ? "현재 설정됨 · 실제 값은 표시하지 않음" : "현재 설정되지 않음";
+  if (element) element.textContent = configured ? "설정되어 있어요 · 값은 표시하지 않습니다" : "아직 설정되지 않았어요";
 }
 
 async function loadSettings() {
@@ -24,12 +24,8 @@ async function loadSettings() {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.message || `HTTP ${response.status}`);
     document.querySelector("#SEARCH_ADAPTER").value = payload.adapter;
-    document.querySelector("#CODEX_TIMEOUT_MS").value = payload.values.codexTimeoutMs;
-    document.querySelector("#PORT").value = payload.values.port;
-    document.querySelector("#SEARCH_DISPLAY").value = payload.values.searchDisplay;
     setConfigured("gemini-configured", payload.configured.geminiApiKey);
     setConfigured("law-configured", payload.configured.lawOc);
-    setConfigured("gcp-configured", payload.configured.gcpProjectId);
   } catch (error) {
     setMessage(`설정을 읽지 못했습니다: ${error.message}`, true);
   }
@@ -37,7 +33,7 @@ async function loadSettings() {
 
 function setCodexMessage(text, isError = false) {
   codexLoginMessage.textContent = text;
-  codexLoginMessage.style.color = isError ? "#b42318" : "#667085";
+  codexLoginMessage.style.color = isError ? "var(--danger)" : "var(--muted)";
 }
 
 async function loadCodexStatus() {
@@ -48,13 +44,13 @@ async function loadCodexStatus() {
     const loggedIn = account.loggedIn === true;
     const weekly = account.codexWeekly || {};
     codexStatus.textContent = loggedIn
-      ? "로그인됨"
-      : "로그인 필요 · GPT 계정 변경 또는 Device code 로그인을 시작하세요.";
-    codexEmail.textContent = loggedIn ? (account.email || "이메일 미제공") : "로그인 필요";
-    codexPlan.textContent = loggedIn ? (account.planType || "확인되지 않음") : "로그인 필요";
+      ? "계정이 연결되어 있어요."
+      : "아직 연결된 계정이 없어요. 아래에서 계정을 연결해 주세요.";
+    codexEmail.textContent = loggedIn ? (account.email || "이메일 미제공") : "연결 필요";
+    codexPlan.textContent = loggedIn ? (account.planType || "확인되지 않음") : "연결 필요";
     if (!loggedIn) {
-      codexWeekly.textContent = "로그인 필요";
-      codexReset.textContent = "로그인 필요";
+      codexWeekly.textContent = "연결 필요";
+      codexReset.textContent = "연결 필요";
     } else if (weekly.available === true && Number.isFinite(Number(weekly.usedPercent)) && Number.isFinite(Number(weekly.remainingPercent))) {
       const used = Math.max(0, Math.min(100, Number(weekly.usedPercent)));
       const remaining = Math.max(0, Math.min(100, Number(weekly.remainingPercent)));
@@ -98,7 +94,7 @@ async function startCodexLogin(type) {
     ? window.open("", "codex-login", "width=720,height=760")
     : null;
   if (type === "chatgpt" && !popup) {
-    setCodexMessage("브라우저 로그인 팝업이 차단되었습니다. 팝업을 허용하거나 Device code 로그인을 사용해 주세요.", true);
+    setCodexMessage("브라우저 로그인 팝업이 차단되었습니다. 팝업을 허용하거나 ‘코드로 연결’을 사용해 주세요.", true);
     return;
   }
   try {
@@ -137,7 +133,7 @@ async function logoutCodex() {
     const response = await fetch("/api/codex/logout", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     const body = await response.json();
     if (!response.ok) throw new Error(body.message || `HTTP ${response.status}`);
-    setCodexMessage("로그아웃했습니다.");
+    setCodexMessage("계정 연결을 해제했습니다.");
     await loadCodexStatus();
   } catch (error) {
     setCodexMessage(`로그아웃하지 못했습니다: ${error.message}`, true);

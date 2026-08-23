@@ -8,50 +8,82 @@
   </head>
   <body>
     <a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
-    <header class="site-header shell">
-      <div><p class="brand-kicker">CASE FINDER SETTINGS</p><h1>설정</h1><p class="subtitle">로컬에서 사용할 검색 엔진과 whitelist 설정을 관리합니다.</p></div>
-      <a class="text-link" href="/">검색으로 돌아가기</a>
+    <header class="topbar">
+      <div class="shell topbar-row">
+        <p class="wordmark">Case Finder <span>· 설정</span></p>
+        <a class="text-link" href="/">검색으로 돌아가기</a>
+      </div>
     </header>
+
     <main id="main-content" class="shell admin-main">
-      <section class="search-card form-card" aria-labelledby="settings-heading">
-        <p class="eyebrow">LOCAL ONLY</p>
-        <h2 id="settings-heading">제품 설정</h2>
-        <p class="helper-text">secret의 현재 값은 표시하지 않습니다. 저장한 값은 서버를 재시작한 뒤 적용됩니다.</p>
-        <form id="settings-form">
+      <div class="page-intro">
+        <h1>설정</h1>
+        <p class="lede">이 컴퓨터에서만 쓰는 설정이에요. 저장한 값은 Case Finder를 다시 시작하면 적용됩니다.</p>
+      </div>
+
+      <form id="settings-form">
+        <section class="admin-section" aria-labelledby="engine-heading">
+          <h2 id="engine-heading">검색 엔진</h2>
+          <p class="helper-text">질문을 분석하고 판례를 고르는 엔진입니다. 바꾸면 검색 속도와 정확도가 달라져요.</p>
           <div class="form-grid">
-            <div class="form-field"><label for="SEARCH_ADAPTER">검색 엔진</label><select id="SEARCH_ADAPTER" name="SEARCH_ADAPTER"><option value="gemini_d">Gemini 빠른 검색</option><option value="luna_native">Luna 고정밀 검색</option></select></div>
-            <div class="form-field"><label for="GEMINI_API_KEY">Gemini API key</label><input id="GEMINI_API_KEY" name="GEMINI_API_KEY" type="password" autocomplete="new-password" placeholder="새 값을 입력할 때만 작성"><small id="gemini-configured">현재 상태 확인 중…</small></div>
-            <div class="form-field"><label for="LAW_OC">법령 API OC</label><input id="LAW_OC" name="LAW_OC" type="password" autocomplete="new-password" placeholder="새 값을 입력할 때만 작성"><small id="law-configured">현재 상태 확인 중…</small></div>
-            <div class="form-field"><label for="CODEX_TIMEOUT_MS">Codex timeout (ms)</label><input id="CODEX_TIMEOUT_MS" name="CODEX_TIMEOUT_MS" inputmode="numeric" type="number" min="30000" max="600000"><small>30,000~600,000 범위</small></div>
-            <div class="form-field"><label for="PORT">서버 포트</label><input id="PORT" name="PORT" inputmode="numeric" type="number" min="1" max="65535"></div>
-            <div class="form-field"><label for="SEARCH_DISPLAY">검색 표시 수</label><input id="SEARCH_DISPLAY" name="SEARCH_DISPLAY" inputmode="numeric" type="number" min="1" max="100"></div>
-            <div class="form-field"><label for="GCP_PROJECT_ID">GCP project ID</label><input id="GCP_PROJECT_ID" name="GCP_PROJECT_ID" autocomplete="off"><small id="gcp-configured">Gemini quota 공식 조회용. 없으면 로컬 추정으로 표시합니다.</small></div>
+            <div class="form-field">
+              <label for="SEARCH_ADAPTER">사용할 엔진</label>
+              <select id="SEARCH_ADAPTER" name="SEARCH_ADAPTER">
+                <option value="gemini_d">Gemini 빠른 검색</option>
+                <option value="luna_native">Luna 고정밀 검색</option>
+              </select>
+            </div>
           </div>
-          <div class="form-actions"><button class="primary-button" type="submit">설정 저장</button><span id="form-message" class="form-message" role="status"></span></div>
-        </form>
-      </section>
-      <section class="status-card" aria-labelledby="codex-heading">
-        <p class="eyebrow">CODEX ACCOUNT</p>
-        <h2 id="codex-heading">Codex 계정</h2>
-        <p class="helper-text">인증과 quota 상태는 Codex app-server가 관리합니다. Case Finder는 token이나 auth.json을 저장하거나 표시하지 않습니다.</p>
-        <div id="codex-status" class="helper-text" role="status">상태 확인 중…</div>
+        </section>
+
+        <section class="admin-section" aria-labelledby="keys-heading">
+          <h2 id="keys-heading">API 키</h2>
+          <p class="helper-text">저장한 키는 다시 화면에 보여주지 않아요. 값을 바꿀 때만 새로 입력하면 됩니다.</p>
+          <div class="form-grid">
+            <div class="form-field">
+              <label for="GEMINI_API_KEY">Gemini API 키</label>
+              <input id="GEMINI_API_KEY" name="GEMINI_API_KEY" type="password" autocomplete="new-password" placeholder="새 값을 입력할 때만 작성">
+              <small id="gemini-configured">현재 상태 확인 중…</small>
+            </div>
+            <div class="form-field">
+              <label for="LAW_OC">법령정보 API 인증키</label>
+              <input id="LAW_OC" name="LAW_OC" type="password" autocomplete="new-password" placeholder="새 값을 입력할 때만 작성">
+              <small id="law-configured">현재 상태 확인 중…</small>
+            </div>
+          </div>
+        </section>
+
         <div class="form-actions">
-          <button id="codex-browser-login" class="primary-button" type="button">GPT 계정 변경</button>
-          <button id="codex-device-login" type="button">Device code 로그인</button>
-          <button id="codex-cancel-login" type="button">로그인 취소</button>
-          <button id="codex-logout" type="button">로그아웃</button>
-          <button id="codex-refresh" type="button">새로고침</button>
+          <button class="primary-button" type="submit">설정 저장</button>
+          <span id="form-message" class="form-message" role="status"></span>
         </div>
-        <p id="codex-login-message" class="form-message" role="status"></p>
+      </form>
+
+      <section class="admin-section" aria-labelledby="codex-heading">
+        <h2 id="codex-heading">Codex 계정</h2>
+        <p class="helper-text">Luna 고정밀 검색을 쓰려면 계정 연결이 필요해요. 로그인 정보는 Codex가 직접 관리하고, Case Finder는 저장하거나 보여주지 않습니다.</p>
+        <p id="codex-status" class="codex-state" role="status">상태 확인 중…</p>
         <dl class="status-list">
-          <div><dt>로그인 계정</dt><dd id="codex-email">확인 중…</dd></div>
+          <div><dt>연결된 계정</dt><dd id="codex-email">확인 중…</dd></div>
           <div><dt>요금제</dt><dd id="codex-plan">확인 중…</dd></div>
-          <div><dt>Codex 주간 사용량</dt><dd id="codex-weekly">확인 중…</dd></div>
+          <div><dt>이번 주 사용량</dt><dd id="codex-weekly">확인 중…</dd></div>
           <div><dt>다음 초기화</dt><dd id="codex-reset">확인 중…</dd></div>
         </dl>
+        <div class="form-actions">
+          <button id="codex-browser-login" class="primary-button" type="button">계정 연결</button>
+          <button id="codex-device-login" class="secondary-button" type="button">코드로 연결</button>
+          <span class="action-spacer"></span>
+          <button id="codex-refresh" class="link-button" type="button">새로고침</button>
+          <button id="codex-cancel-login" class="link-button" type="button">연결 취소</button>
+          <button id="codex-logout" class="link-button" type="button">연결 해제</button>
+        </div>
+        <p id="codex-login-message" class="form-message" role="status"></p>
       </section>
-      <section class="status-card"><p class="eyebrow">RUNTIME</p><h2>설치 runtime</h2><p class="helper-text">제품 설치본은 packaged Codex app-server를 우선 사용합니다. 개발자용 CLI 경로 override는 이 화면에 노출하지 않습니다.</p></section>
     </main>
+
+    <footer class="site-footer shell">
+      <p>설정과 인증 정보는 이 컴퓨터 밖으로 나가지 않습니다.</p>
+    </footer>
     <script type="module" src="/admin.js"></script>
   </body>
 </html>

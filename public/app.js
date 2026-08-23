@@ -8,7 +8,7 @@ const progressPanel = document.querySelector("#progress-panel");
 const progressLabel = document.querySelector("#progress-label");
 const progressPercent = document.querySelector("#progress-percent");
 const progressBar = document.querySelector("#progress-bar");
-const progressSteps = [...document.querySelectorAll("[data-progress-step]")];
+const exampleChips = [...document.querySelectorAll("[data-example]")];
 const serviceStatus = document.querySelector("#service-status");
 const refreshStatus = document.querySelector("#refresh-status");
 const toast = document.querySelector("#toast");
@@ -25,6 +25,14 @@ const EVENT_RANK = {
   SEARCH_COMPLETE: 7,
   SEARCH_FAILED: 7,
 };
+
+const FAILURE_HEADINGS = Object.freeze({
+  SEARCH_FAILED: "원문 검증에 실패했습니다",
+  SAFETY_REJECTED: "결과를 표시하지 않았습니다",
+  NO_RESULT: "표시할 결과가 없습니다",
+  LUNA_RUNTIME_UNAVAILABLE: "검색 엔진을 사용할 수 없습니다",
+  NETWORK_SERVER_ERROR: "검색을 완료하지 못했습니다",
+});
 
 const TERMINAL_STATUS = Object.freeze({
   SUCCESS: ["검색을 완료했습니다.", "success"],
@@ -51,7 +59,6 @@ function resetProgress() {
   progressBar.style.width = "0%";
   progressPercent.textContent = "0%";
   progressLabel.textContent = "검색을 시작했습니다.";
-  for (const step of progressSteps) step.classList.remove("is-complete", "is-current");
 }
 
 function handleProgress(payload) {
@@ -62,17 +69,13 @@ function handleProgress(payload) {
   progressLabel.textContent = payload.label || "검색 중…";
   progressPercent.textContent = `${Math.max(0, Math.min(100, Number(payload.percent) || 0))}%`;
   progressBar.style.width = progressPercent.textContent;
-  for (const step of progressSteps) {
-    const stepRank = EVENT_RANK[step.dataset.progressStep];
-    step.classList.toggle("is-complete", stepRank < rank);
-    step.classList.toggle("is-current", stepRank === rank);
-  }
   setStatus(payload.label || "검색 중…", "loading");
 }
 
 function showFailure(payload) {
   const message = payload?.message || "검색 처리 중 오류가 발생했습니다.";
-  result.innerHTML = `<section class="state-panel state-error"><h2>${payload?.terminalState || "검색 실패"}</h2><p>${escapeHtml(message)}</p></section>`;
+  const heading = FAILURE_HEADINGS[payload?.terminalState] || "검색을 완료하지 못했습니다";
+  result.innerHTML = `<section class="state-panel state-error"><h2>${escapeHtml(heading)}</h2><p>${escapeHtml(message)}</p></section>`;
   setStatus(message, "error");
 }
 
@@ -166,7 +169,7 @@ async function submitSearch(event) {
   fallbackToastShown = false;
   window.clearTimeout(fallbackToastTimer);
   if (toast) toast.hidden = true;
-  const timer = window.setTimeout(() => { progressPanel.hidden = false; }, 1000);
+  progressPanel.hidden = false;
   setStatus("검색을 시작했습니다.", "loading");
   try {
     const response = await fetch("/ask/stream", {
@@ -179,7 +182,6 @@ async function submitSearch(event) {
   } catch (error) {
     showFailure({ terminalState: "NETWORK_SERVER_ERROR", message: `검색 처리 중 오류가 발생했습니다: ${error.message}` });
   } finally {
-    window.clearTimeout(timer);
     progressPanel.hidden = true;
     searching = false;
     searchButton.disabled = false;
@@ -211,4 +213,10 @@ async function loadServiceStatus() {
 
 form.addEventListener("submit", submitSearch);
 refreshStatus.addEventListener("click", loadServiceStatus);
+for (const chip of exampleChips) {
+  chip.addEventListener("click", () => {
+    queryInput.value = chip.dataset.example;
+    queryInput.focus();
+  });
+}
 loadServiceStatus();

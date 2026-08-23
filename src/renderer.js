@@ -48,7 +48,7 @@ function renderLawReference(reference) {
   const text = String(reference?.text || "").trim();
   const content = text
     ? `<details class="law-details"><summary>전문 보기</summary><p>${textBlock(text)}</p></details>`
-    : `<p class="metadata">provider 원문을 확인할 수 없습니다. 법령센터 링크에서 확인해 주세요.</p>`;
+    : `<p class="metadata">조문 본문을 불러오지 못했어요. 위 링크에서 확인해 주세요.</p>`;
   return `<li class="law-reference">${title}${content}</li>`;
 }
 
@@ -62,7 +62,7 @@ function renderLawSection(references) {
     const rendered = renderLawReference(law);
     if (rendered) laws.push(rendered);
   }
-  return laws.length > 0 ? `<section class="result-section"><h2>관련 법규</h2><ul class="law-list">${laws.join("")}</ul></section>` : "";
+  return laws.length > 0 ? `<section class="result-section"><h2>관련 법규<span class="section-count">${laws.length}건</span></h2><ul class="law-list">${laws.join("")}</ul></section>` : "";
 }
 
 function renderCase(item) {
@@ -72,20 +72,29 @@ function renderCase(item) {
   const link = href
     ? `<a class="case-number" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${caseNumber}</a>`
     : `<span class="case-number">${caseNumber}</span>`;
-  const matchLabel = item.match === "direct" ? "직접 관련" : "관련 판례";
+  const isDirect = item.match === "direct";
+  const matchLabel = isDirect ? "직접 관련" : "관련 판례";
   const metadata = [item.title, item.court, item.date].filter(Boolean).map(escapeHtml).join(" · ");
   const sections = item.detail?.sections || {};
   const holding = sections.판결요지 || sections.결정요지;
-  const detail = [
-    sections.판시사항 ? `<div><dt>판시사항</dt><dd>${textBlock(sections.판시사항)}</dd></div>` : "",
-    holding ? `<div><dt>${sections.결정요지 ? "결정요지" : "판결요지"}</dt><dd>${textBlock(holding)}</dd></div>` : "",
-  ].filter(Boolean).join("");
-  return `<article class="case-card"><div class="case-card-header"><span class="match-label">${escapeHtml(matchLabel)}</span><h3>${link}</h3></div>${metadata ? `<p class="metadata">${metadata}</p>` : ""}${detail ? `<dl class="case-detail">${detail}</dl>` : ""}</article>`;
+  const holdingLabel = sections.판결요지 ? "판결요지" : "결정요지";
+  const lead = sections.판시사항 || holding;
+  const more = sections.판시사항 && holding
+    ? `<details class="case-more"><summary>${holdingLabel}</summary><p>${textBlock(holding)}</p></details>`
+    : "";
+  const badge = `<span class="match-label${isDirect ? "" : " is-related"}">${escapeHtml(matchLabel)}</span>`;
+  return `<article class="case-card"><div class="case-card-header"><h3>${link}</h3>${badge}</div>${metadata ? `<p class="metadata">${metadata}</p>` : ""}${lead ? `<p class="case-lead">${textBlock(lead)}</p>` : ""}${more}</article>`;
 }
 
 function renderDirectMiss() {
   return `<section class="state-panel state-no-result direct-miss" data-state="NO_RESULT"><h2>사건번호 조회 결과 없음</h2><p>${escapeHtml(DIRECT_LOOKUP_MISS_PRIMARY)}</p><p class="secondary-copy">${escapeHtml(DIRECT_LOOKUP_MISS_SECONDARY)}</p><div class="cta-row"><a class="secondary-button" href="${escapeHtml(COURT_DECISION_VIEW_URL)}" target="_blank" rel="noopener noreferrer">판결서 인터넷열람</a><a class="secondary-button" href="${escapeHtml(COURT_DECISION_COPY_URL)}" target="_blank" rel="noopener noreferrer">판결서사본 제공신청</a></div></section>`;
 }
+
+const STATE_HEADINGS = Object.freeze({
+  SAFETY_REJECTED: "결과를 표시하지 않았습니다",
+  SEARCH_FAILED: "원문 검증에 실패했습니다",
+  NO_RESULT: "표시할 결과가 없습니다",
+});
 
 function renderStateMessage(state, message) {
   const labels = {
@@ -93,23 +102,24 @@ function renderStateMessage(state, message) {
     SEARCH_FAILED: SEARCH_FAILED_MESSAGE,
     NO_RESULT: NO_RESULT_MESSAGE,
   };
-  return `<section class="state-panel state-${state.toLowerCase()}" data-state="${escapeHtml(state)}"><h2>${escapeHtml(state)}</h2><p>${escapeHtml(message || labels[state] || "검색 결과를 표시할 수 없습니다.")}</p></section>`;
+  const heading = STATE_HEADINGS[state] || "검색 결과를 표시할 수 없습니다";
+  return `<section class="state-panel state-${state.toLowerCase()}" data-state="${escapeHtml(state)}"><h2>${escapeHtml(heading)}</h2><p>${escapeHtml(message || labels[state] || "검색 결과를 표시할 수 없습니다.")}</p></section>`;
 }
 
 export function renderResults(result = {}) {
   const state = result.terminalState || "SUCCESS";
-  const query = `<p class="query"><span class="eyebrow">사용자 질문</span><strong>${escapeHtml(result.query)}</strong></p>`;
+  const query = `<p class="query"><strong>${escapeHtml(result.query)}</strong> 검색 결과</p>`;
   if (state === "SAFETY_REJECTED" || state === "SEARCH_FAILED" || state === "NO_RESULT") {
     if (state === "NO_RESULT" && result.route !== "direct") {
       const rationale = result.intro
         ? `<p class="intro">${textBlock(result.intro)}</p>`
         : `<p class="empty">${escapeHtml(NO_RESULT_MESSAGE)}</p>`;
       const lawSection = renderLawSection(result.lawReferences);
-      const empty = `<section class="state-panel state-no-result" data-state="NO_RESULT"><h2>NO_RESULT</h2>${rationale}</section>`;
-      return `<div class="fable-results" data-terminal-state="NO_RESULT">${query}${empty}${lawSection}<p class="disclaimer">본 결과는 법제처 국가법령정보 Open API 데이터를 기반으로 하며, 법률 자문이 아닙니다.</p></div>`;
+      const empty = `<section class="state-panel state-no-result" data-state="NO_RESULT"><h2>${STATE_HEADINGS.NO_RESULT}</h2>${rationale}</section>`;
+      return `<div class="fable-results" data-terminal-state="NO_RESULT">${query}${empty}${lawSection}</div>`;
     }
     const empty = state === "NO_RESULT" && result.route === "direct" ? renderDirectMiss() : renderStateMessage(state);
-    return `<div class="fable-results" data-terminal-state="${escapeHtml(state)}">${query}${empty}<p class="disclaimer">본 결과는 법제처 국가법령정보 Open API 데이터를 기반으로 하며, 법률 자문이 아닙니다.</p></div>`;
+    return `<div class="fable-results" data-terminal-state="${escapeHtml(state)}">${query}${empty}</div>`;
   }
 
   const items = (Array.isArray(result.items) ? result.items : []).filter((item) => item?.status === "verified");
@@ -119,9 +129,11 @@ export function renderResults(result = {}) {
   ];
 
   const allRelated = items.length > 0 && items.every((item) => item.match === "related");
-  const caseHeading = items.length === 0
-    ? "관련 판례"
-    : allRelated ? "관련 판례 · 질문과 정확히 일치하는 판례 없음" : "관련 판례";
+  const caseHeading = [
+    "관련 판례",
+    items.length > 0 ? `<span class="section-count">${items.length}건</span>` : "",
+    allRelated ? `<span class="section-note">질문과 정확히 일치하는 판례는 없습니다</span>` : "",
+  ].filter(Boolean).join("");
   const cases = items.length > 0
     ? items.map(renderCase).join("")
     : `<p class="empty">${escapeHtml(NO_RESULT_MESSAGE)}</p>`;
@@ -131,5 +143,5 @@ export function renderResults(result = {}) {
   const ignored = result.ignoredCaseCount > 0
     ? `<p class="notice">사건번호는 최대 5개까지만 조회했습니다. 초과한 ${escapeHtml(result.ignoredCaseCount)}개는 무시했습니다.</p>`
     : "";
-  return `<div class="fable-results" data-terminal-state="SUCCESS">${query}${intro}${fallback}${ignored}${lawSection}<section class="result-section"><h2>${caseHeading}</h2>${cases}</section><p class="disclaimer">본 결과는 법제처 국가법령정보 Open API 데이터를 기반으로 하며, 법률 자문이 아닙니다.</p></div>`;
+  return `<div class="fable-results" data-terminal-state="SUCCESS">${query}${intro}${fallback}${ignored}<section class="result-section"><h2>${caseHeading}</h2>${cases}</section>${lawSection}</div>`;
 }
