@@ -57,6 +57,10 @@ function nativeToolCall(event) {
   return event?.type === "tool_call" || event?.type === "mcp_tool_call";
 }
 
+function isLegalSearchTool(name) {
+  return name === "search_decisions" || name === "search_law";
+}
+
 export function createCodexNativeAo({
   gateway,
   ledger = gateway.ledger,
@@ -72,14 +76,17 @@ export function createCodexNativeAo({
 
   return {
     provider: "codex_luna",
-    async run(query, { onProgress = () => {} } = {}) {
+    async run(query, { onProgress = () => {}, abortSignal = null } = {}) {
       telemetry.setQuestionScopeId(ledger.scopeId);
       const startedAt = Date.now();
+      safety.assertCanContinue();
+      const acceptedSearchTools = new Set();
       const recordDelegatedToolResult = ({ name, arguments: args = {}, result: toolResult } = {}) => {
         const normalized = toolResult?.items || toolResult?.caseNumber || toolResult?.rawText
           ? toolResult
           : normalizeLegalToolResult(name, toolResult || {});
         if (!normalized || normalized.isError) return;
+        if (isLegalSearchTool(name)) acceptedSearchTools.add(name);
         const progressSnapshot = ledgerProgressEvent(ledger);
         const progress = {
           candidateCount: progressSnapshot.candidateCount,
@@ -118,14 +125,24 @@ export function createCodexNativeAo({
         reasoningEffort: config.codexReasoningEffort,
         tools: CODEX_NATIVE_ALLOWED_TOOLS.map((name) => ({ name, kind: "legal", restricted: true })),
         onDelegatedToolResult: recordDelegatedToolResult,
+        abortSignal,
       });
       telemetry.setSessionId(session?.sessionId || session?.session_id || null);
       let closed = false;
+      const abortHandler = () => {
+        if (closed) return;
+        closed = true;
+        void session.close?.();
+      };
+      abortSignal?.addEventListener("abort", abortHandler, { once: true });
       try {
         while (true) {
           safety.assertCanContinue();
           const event = await session.next();
-          if (!event) throw new Error("CODEX_NATIVE_SESSION_ENDED_WITHOUT_FINAL");
+          if (!event) {
+            safety.assertCanContinue();
+            throw new Error("CODEX_NATIVE_SESSION_ENDED_WITHOUT_FINAL");
+          }
           if (event.type === "session_timeout") throw new Error("CODEX_NATIVE_SESSION_TIMEOUT");
           if (FORBIDDEN_EVENT_TYPES.has(event.type)) {
             telemetry.recordToolCall(event.type, { rejected: true, errorCode: "FORBIDDEN_TOOL" });
@@ -176,6 +193,7 @@ export function createCodexNativeAo({
               continue;
             }
             const result = await gateway.execute(name, event.arguments || event.args || {});
+            if (!result?.isError && isLegalSearchTool(name)) acceptedSearchTools.add(name);
             if (typeof session.respondToToolCall !== "function") throw new Error("CODEX_NATIVE_SESSION_TOOL_RESPONSE_REQUIRED");
             await session.respondToToolCall({ callId: event.call_id || event.callId || null, name, result });
             safety.noteEvidenceCount(ledgerProgress(ledger).evidenceCount);
@@ -201,6 +219,26 @@ export function createCodexNativeAo({
                 effectiveModel: modelResolution.effectiveModel,
               });
             }
+            if (acceptedSearchTools.size === 0) {
+              telemetry.markProtocolInvalid();
+              telemetry.setStopReason("AO_V2_SEARCH_REQUIRED");
+              return {
+                provider: "codex_luna",
+                architecture: "AO_V2",
+                selected: [],
+                intro: "",
+                rejectedSelected: [],
+                protocolDiagnostics: [{ code: "AO_V2_SEARCH_REQUIRED" }],
+                output_valid: false,
+                model_protocol_clean: false,
+                selection_repaired: false,
+                protocolPass: false,
+                modelResolution,
+                ledger: ledger.snapshot(),
+                telemetry: telemetry.snapshot(ledger),
+                elapsed_ms: Date.now() - startedAt,
+              };
+            }
             const attempt = event.selection || event.value || event;
             const gated = evidenceEnvelope.finalizeSelection(attempt);
             evidenceEnvelope.recordSelectionDiagnostic({ selection: attempt, gated, continuationCount: 0 });
@@ -221,6 +259,7 @@ export function createCodexNativeAo({
           }
         }
       } finally {
+        abortSignal?.removeEventListener("abort", abortHandler);
         if (!closed && typeof session.close === "function") {
           closed = true;
           await session.close();

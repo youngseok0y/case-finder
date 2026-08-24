@@ -113,6 +113,31 @@ test("provider detail requires the observed provider ID provenance", () => {
   assert.equal(ledger.snapshot().detailTraces[0].same_provider_provenance, false);
 });
 
+test("provider detail provenance is bound to the decision domain", () => {
+  const ledger = createEvidenceLedger({ provider: "domain-provenance-fixture" });
+  ledger.recordDecisionSearch({
+    query: "precedent fixture",
+    domain: "precedent",
+    items: [{ id: "123", caseNumber: "2020다1234" }],
+  });
+  ledger.recordDecisionSearch({
+    query: "constitutional fixture",
+    domain: "constitutional",
+    items: [{ id: "123", caseNumber: "2020헌마123" }],
+  });
+
+  const verified = ledger.recordDecisionDetail({
+    domain: "constitutional",
+    id: "123",
+    caseNumber: "2020헌마123",
+    rawText: "constitutional provider decision text",
+  });
+
+  assert.equal(verified.verified, true);
+  assert.equal(ledger.getCase("2020헌마123").detailVerified, true);
+  assert.equal(ledger.getCase("2020다1234").detailVerified, false);
+});
+
 test("common envelope exposes the same observed, verified, and selectable state", () => {
   const { ledger } = replayDetail({ observedCaseNumber: "2023므10519", id: "state" });
   const envelope = createCommonEvidenceEnvelope({ ledger, resultMax: 5 });
@@ -137,12 +162,21 @@ test("common envelope exposes the same observed, verified, and selectable state"
 });
 
 test("Luna adapter receives the common envelope contract", async () => {
-  const sessionFactory = async () => ({
-    async next() {
-      return { type: "final", selection: { selected: [], intro: "" } };
-    },
-    async close() {},
-  });
+  const sessionFactory = async ({ onDelegatedToolResult }) => {
+    let searched = false;
+    return {
+      async next() {
+        if (!searched) {
+          searched = true;
+          const args = { domain: "precedent", query: "공통 evidence fixture" };
+          onDelegatedToolResult({ name: "search_decisions", arguments: args, result: { items: [] } });
+          return { type: "mcp_tool_call", delegated: true, name: "search_decisions", arguments: args, call_id: "search-1" };
+        }
+        return { type: "final", selection: { selected: [], intro: "" } };
+      },
+      async close() {},
+    };
+  };
   const search = createAgenticSearchV2({
     provider: "codex_luna",
     adapterOptions: { createSession: sessionFactory },

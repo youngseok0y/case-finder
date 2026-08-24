@@ -235,13 +235,15 @@ export class EvidenceLedger {
   }
 
   recordDecisionDetail({ domain, id, caseNumber, detail = {}, rawText = "", verified = true } = {}) {
+    const requestedDomain = text(domain);
     const requestedId = text(id);
     const rawDetailCaseNumber = rawCaseNumberOf(caseNumber || detail.caseNumber);
     const candidateByProvider = requestedId
-      ? [...this.cases.values()].find((item) => item.providerIds.includes(requestedId))
+      ? [...this.cases.values()].find((item) => item.domain === requestedDomain && item.providerIds.includes(requestedId))
       : null;
     const candidateByIdentity = rawDetailCaseNumber
-      ? [...this.cases.values()].find((item) => caseIdentityMatches(item.rawCaseNumber || item.caseNumber, rawDetailCaseNumber))
+      ? [...this.cases.values()].find((item) => item.domain === requestedDomain
+        && caseIdentityMatches(item.rawCaseNumber || item.caseNumber, rawDetailCaseNumber))
       : null;
     const candidate = candidateByProvider || candidateByIdentity;
     if (!candidate) {

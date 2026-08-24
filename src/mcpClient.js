@@ -4,6 +4,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { config, ROOT_DIR } from "../config.js";
 import { logError, logInfo } from "./log.js";
+import { buildLegalMcpEnv } from "./runtimeEnv.js";
 
 let client = null;
 let transport = null;
@@ -18,7 +19,7 @@ export function buildMcpServerParameters({
   runtimePaths = config.runtimePaths,
   lawOc = config.lawOc,
 } = {}) {
-  const env = { ...source, LAW_OC: lawOc };
+  const env = buildLegalMcpEnv(source, lawOc);
   const upstreamEntry = path.join(rootDir, "node_modules", "korean-law-mcp", "build", "index.js");
   const managedNodePath = runtimePaths?.managedNodePath || "";
   if (platform === "win32" && managedNodePath && fsImpl.existsSync(managedNodePath) && fsImpl.existsSync(upstreamEntry)) {
@@ -49,9 +50,18 @@ export function buildMcpServerParameters({
 }
 
 export const MCP_CALL_TIMEOUT = "MCP_CALL_TIMEOUT";
+export const MCP_CALL_ABORTED = "ABORTED";
 
-export function withMcpTimeout(promise, timeoutMs) {
+function abortedError() {
+  const error = new Error("MCP call aborted");
+  error.code = MCP_CALL_ABORTED;
+  return error;
+}
+
+export function withMcpTimeout(promise, timeoutMs, signal = null) {
+  if (signal?.aborted) return Promise.reject(abortedError());
   let timer = null;
+  let abortHandler = null;
   const timeoutPromise = new Promise((_, reject) => {
     timer = setTimeout(() => {
       const error = new Error(`MCP call timed out after ${timeoutMs}ms`);
@@ -60,8 +70,13 @@ export function withMcpTimeout(promise, timeoutMs) {
     }, timeoutMs);
     timer.unref?.();
   });
-  return Promise.race([Promise.resolve(promise), timeoutPromise]).finally(() => {
+  const abortPromise = new Promise((_, reject) => {
+    abortHandler = () => reject(abortedError());
+    signal?.addEventListener("abort", abortHandler, { once: true });
+  });
+  return Promise.race([Promise.resolve(promise), timeoutPromise, abortPromise]).finally(() => {
     if (timer) clearTimeout(timer);
+    if (abortHandler) signal?.removeEventListener("abort", abortHandler);
   });
 }
 
@@ -78,15 +93,16 @@ export async function runMcpCall({
   closeTransport = async () => {},
   reconnect = async () => {},
   beforeRetry = async () => {},
+  signal = null,
 } = {}) {
   try {
-    return await withMcpTimeout(Promise.resolve().then(call), timeoutMs);
+    return await withMcpTimeout(Promise.resolve().then(call), timeoutMs, signal);
   } catch (error) {
     if (error?.code === MCP_CALL_TIMEOUT || !isMcpTransportFailure(error)) throw error;
     await beforeRetry(error);
     await closeTransport();
     await reconnect();
-    return withMcpTimeout(Promise.resolve().then(call), timeoutMs);
+    return withMcpTimeout(Promise.resolve().then(call), timeoutMs, signal);
   }
 }
 
@@ -156,17 +172,21 @@ async function invalidateMcpTransport() {
   });
 }
 
-export async function callTool(name, args = {}, timeoutMs = config.mcpTimeoutMs) {
+export async function callTool(name, args = {}, timeoutOrOptions = config.mcpTimeoutMs, options = {}) {
+  const timeoutMs = typeof timeoutOrOptions === "number" ? timeoutOrOptions : config.mcpTimeoutMs;
+  const signal = typeof timeoutOrOptions === "object" ? timeoutOrOptions?.signal || null : options.signal || null;
+  if (signal?.aborted) throw abortedError();
   await startMcp();
   return runMcpCall({
     timeoutMs,
+    signal,
     call: () => {
       if (!client) {
         const error = new Error("MCP transport is unavailable");
         error.code = "MCP_TRANSPORT_UNAVAILABLE";
         throw error;
       }
-      return client.callTool({ name, arguments: args });
+      return client.callTool({ name, arguments: args }, undefined, { signal });
     },
     beforeRetry: (error) => logError(`MCP call failed; reconnecting once: ${name}`, error),
     closeTransport: invalidateMcpTransport,

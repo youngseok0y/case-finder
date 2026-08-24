@@ -7,7 +7,6 @@ import { reserveGeminiCall } from "./rateLimiter.js";
 let client = null;
 let planPrompt = null;
 let selectPrompt = null;
-let agentPrompt = null;
 
 const PLAN_SCHEMA = {
   type: Type.OBJECT,
@@ -43,58 +42,6 @@ function selectionSchema(caseNumbers) {
   };
 }
 
-const AGENTIC_FUNCTIONS = [
-  {
-    name: "search_decisions",
-    description: "판례 또는 헌재 결정례를 검색합니다. 검색 결과의 사건번호와 id만 근거로 후속 조회하세요.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        domain: { type: Type.STRING, enum: ["precedent", "constitutional", "admin_appeal"] },
-        query: { type: Type.STRING },
-        display: { type: Type.INTEGER, minimum: 1, maximum: config.searchDisplay },
-      },
-      required: ["domain", "query"],
-    },
-  },
-  {
-    name: "search_law",
-    description: "법령명을 검색해 법령일련번호(mst) 또는 법령ID(lawId)를 확인합니다.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        query: { type: Type.STRING },
-        display: { type: Type.INTEGER, minimum: 1, maximum: 5 },
-      },
-      required: ["query"],
-    },
-  },
-  {
-    name: "get_law_text",
-    description: "검색 결과에서 확인한 mst 또는 lawId의 조문 원문을 조회합니다.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        mst: { type: Type.STRING },
-        lawId: { type: Type.STRING },
-        jo: { type: Type.STRING },
-      },
-    },
-  },
-  {
-    name: "get_decision_text",
-    description: "검색 결과에서 확인한 id의 판례·결정례 원문을 축약 모드로 조회합니다.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        domain: { type: Type.STRING, enum: ["precedent", "constitutional", "admin_appeal"] },
-        id: { type: Type.STRING },
-      },
-      required: ["domain", "id"],
-    },
-  },
-];
-
 async function getClient() {
   if (!config.geminiApiKey) throw new Error("GEMINI_API_KEY가 설정되지 않았습니다.");
   if (!client) client = new GoogleGenAI({ apiKey: config.geminiApiKey });
@@ -105,10 +52,6 @@ async function getPrompt(name) {
   if (name === "plan") {
     planPrompt ||= await fs.readFile(path.join(ROOT_DIR, "prompts", "plan.txt"), "utf8");
     return planPrompt;
-  }
-  if (name === "agent") {
-    agentPrompt ||= await fs.readFile(path.join(ROOT_DIR, "prompts", "agent.txt"), "utf8");
-    return agentPrompt;
   }
   selectPrompt ||= await fs.readFile(path.join(ROOT_DIR, "prompts", "select.txt"), "utf8");
   return selectPrompt;
@@ -147,10 +90,6 @@ function validateSelection(selection) {
     selected: selection.selected.slice(0, config.resultMax).filter((item) => item && typeof item.case_no === "string" && (item.match === "direct" || item.match === "related")),
     intro: typeof selection.intro === "string" ? selection.intro.trim() : "",
   };
-}
-
-export function parseSelectionResponse(response) {
-  return validateSelection(parseJsonResponse(response));
 }
 
 function isRateLimitError(error) {
@@ -203,26 +142,6 @@ export async function generateContent(request, options = {}) {
       throw retryError;
     }
   }
-}
-
-export async function generateAgenticTurn(contents, observedCaseNumbers, questionCalls, options = {}) {
-  return generateContent({
-    model: config.geminiModel,
-    contents,
-    config: {
-      systemInstruction: await getPrompt("agent"),
-      tools: [{ functionDeclarations: AGENTIC_FUNCTIONS }],
-      responseMimeType: "application/json",
-      responseSchema: selectionSchema(observedCaseNumbers),
-    },
-  }, {
-    questionCalls,
-    questionLimit: options.questionLimit,
-    enforceQuestionLimit: options.enforceQuestionLimit,
-    rpdReserve: options.rpdReserve,
-    telemetry: options.telemetry,
-    returnMeta: true,
-  });
 }
 
 export async function generatePlan(query, telemetry = null) {

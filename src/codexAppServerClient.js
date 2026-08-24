@@ -1,5 +1,27 @@
 import { createInterface } from "node:readline";
 
+export const APP_SERVER_BUFFER_LIMITS = Object.freeze({
+  notifications: 256,
+  parseErrors: 64,
+  stderrBytes: 64 * 1024,
+});
+
+function pushRecent(array, value, limit) {
+  array.push(value);
+  if (array.length > limit) array.splice(0, array.length - limit);
+}
+
+function pushStderr(array, value, limitBytes) {
+  array.push(value);
+  let totalBytes = array.reduce((sum, item) => sum + Buffer.byteLength(item, "utf8"), 0);
+  while (array.length > 1 && totalBytes > limitBytes) {
+    totalBytes -= Buffer.byteLength(array.shift(), "utf8");
+  }
+  if (totalBytes > limitBytes) {
+    array[0] = Buffer.from(array[0], "utf8").subarray(-limitBytes).toString("utf8");
+  }
+}
+
 function protocolError(code, message, cause = null) {
   const error = new Error(`${code}:${message}`);
   error.code = code;
@@ -38,7 +60,7 @@ export class AppServerClient {
     this.onProcessError = onProcessError;
     this.rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
     this.rl.on("line", (line) => this.#handleLine(line));
-    child.stderr?.on("data", (chunk) => this.stderr.push(String(chunk)));
+    child.stderr?.on("data", (chunk) => pushStderr(this.stderr, String(chunk), APP_SERVER_BUFFER_LIMITS.stderrBytes));
     child.on("error", (error) => this.#failAll(this.#classifyProcessError(error)));
     child.on("exit", (code, signal) => {
       this.processExited = true;
@@ -74,7 +96,7 @@ export class AppServerClient {
     try {
       message = JSON.parse(line);
     } catch (error) {
-      this.parseErrors.push({ line: line.slice(0, 500), error: error.message });
+      pushRecent(this.parseErrors, { line: line.slice(0, 500), error: error.message }, APP_SERVER_BUFFER_LIMITS.parseErrors);
       return;
     }
 
@@ -85,7 +107,7 @@ export class AppServerClient {
       return;
     }
     if (message.method) {
-      this.notifications.push(message);
+      pushRecent(this.notifications, message, APP_SERVER_BUFFER_LIMITS.notifications);
       this.onNotification(message);
       for (const waiter of [...this.waiters]) {
         if (!waiter.predicate(message)) continue;

@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { config, ROOT_DIR } from "../config.js";
+import { config } from "../config.js";
 
-const usagePath = path.join(ROOT_DIR, "state", "usage.json");
+const usagePath = path.join(config.runtimePaths.statePath, "usage.json");
 const RPM_WINDOW_MS = 60_000;
 
 export class GeminiLimitExceededError extends Error {

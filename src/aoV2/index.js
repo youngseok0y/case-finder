@@ -46,12 +46,18 @@ export function createAgenticSearchV2({
       reasoningEffort: provider === "codex_luna" ? config.codexReasoningEffort : null,
       questionScopeId: ledger.scopeId,
     });
-    const safety = createSafetyController();
+    const safety = createSafetyController({ abortSignal: runOptions.abortSignal });
     const envelope = createCommonEvidenceEnvelope({
       ledger,
       resultMax: Number.isInteger(adapterOptions.resultMax) ? adapterOptions.resultMax : config.resultMax,
     });
-    const gateway = createLegalToolGateway({ ...gatewayOptions, ledger, telemetry, safety });
+    const gateway = createLegalToolGateway({
+      ...gatewayOptions,
+      ledger,
+      telemetry,
+      safety,
+      signal: runOptions.abortSignal,
+    });
     if (provider !== "codex_luna") throw new Error(`AO_V2_PROVIDER_RETIRED:${provider}`);
     const adapter = createCodexNativeAo({ ...adapterOptions, gateway, ledger, telemetry, safety, envelope });
     const result = await adapter.run(query, runOptions);

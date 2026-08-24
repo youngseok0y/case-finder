@@ -17,9 +17,9 @@ export function recordMcpCall(telemetry, name) {
   if (name === "get_decision_text" || name === "get_law_text") telemetry.mcpDetailCalls = (telemetry.mcpDetailCalls || 0) + 1;
 }
 
-export async function trackedCallTool(name, args, telemetry = null) {
+export async function trackedCallTool(name, args, telemetry = null, options = {}) {
   recordMcpCall(telemetry, name);
-  return callTool(name, args);
+  return callTool(name, args, options);
 }
 
 function decodeBasicHtml(value) {
@@ -235,12 +235,12 @@ export function parseStatuteReferences(referenceText) {
   return references;
 }
 
-export async function enrichLawReferences(referenceText, telemetry = null, executeTool = null) {
+export async function enrichLawReferences(referenceText, telemetry = null, executeTool = null, options = {}) {
   const references = parseStatuteReferences(referenceText).slice(0, config.lawMax);
   const enriched = [];
   const execute = typeof executeTool === "function"
     ? executeTool
-    : (name, args) => trackedCallTool(name, args, telemetry);
+    : (name, args) => trackedCallTool(name, args, telemetry, options);
   for (const reference of references) {
     try {
       const searchResult = await execute("search_law", {
@@ -273,12 +273,12 @@ export async function enrichLawReferences(referenceText, telemetry = null, execu
   return enriched;
 }
 
-export async function lookupDecisionCandidate(candidate, domain = "precedent", prefetched = null, telemetry = null) {
+export async function lookupDecisionCandidate(candidate, domain = "precedent", prefetched = null, telemetry = null, options = {}) {
   const detailResult = prefetched?.result || await trackedCallTool("get_decision_text", {
     domain,
     id: candidate.id,
     full: false,
-  }, telemetry);
+  }, telemetry, options);
   const detailText = prefetched?.text || toolText(detailResult);
   const detail = prefetched?.detail || parseDecisionDetail(detailText);
   const detailValid = !detailResult?.isError
@@ -298,18 +298,18 @@ export async function lookupDecisionCandidate(candidate, domain = "precedent", p
     type: detail.type || candidate.type,
     link: sanitizeApiLink(candidate.link, candidate.id) || decisionDetailLink(domain, candidate.id),
     detail,
-    lawReferences: detailValid ? await enrichLawReferences(detail.sections.참조조문 || "", telemetry) : [],
+    lawReferences: detailValid ? await enrichLawReferences(detail.sections.참조조문 || "", telemetry, null, options) : [],
   };
 }
 
-async function lookupOne(caseRequest) {
-  const options = { caseNumber: caseRequest.caseNumber };
-  if (caseRequest.domain === "precedent") options.search = 2;
+async function lookupOne(caseRequest, callOptions = {}) {
+  const searchOptions = { caseNumber: caseRequest.caseNumber };
+  if (caseRequest.domain === "precedent") searchOptions.search = 2;
   const searchResult = await callTool("search_decisions", {
     domain: caseRequest.domain,
-    options,
+    options: searchOptions,
     display: 100,
-  });
+  }, callOptions);
   const searchText = toolText(searchResult);
   const candidates = parseDecisionSearchResults(searchText);
   const candidate = candidates.find(
@@ -340,13 +340,17 @@ async function lookupOne(caseRequest) {
       candidateCaseNumbers: candidates.map((item) => item.caseNumber).filter(Boolean),
     },
     caseRequest.domain,
+    null,
+    null,
+    callOptions,
   );
 }
 
-export async function lookupDirect(query, route) {
+export async function lookupDirect(query, route, { abortSignal = null } = {}) {
+  const options = { signal: abortSignal };
   const items = [];
   for (const caseRequest of route.cases) {
-    items.push(await lookupOne(caseRequest));
+    items.push(await lookupOne(caseRequest, options));
   }
   return {
     route: "direct",

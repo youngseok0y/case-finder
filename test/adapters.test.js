@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { config } from "../config.js";
+import { ADMIN_SETTING_KEYS, validateAdminPatch } from "../src/adminConfig.js";
 import {
   createSearchAdapterRegistry,
   GEMINI_D_EXECUTION_PIN,
@@ -21,6 +22,9 @@ test("product adapter registry and search configuration are frozen", () => {
   assert.equal(config.searchDisplay, 20);
   assert.equal(config.candidateMax, 20);
   assert.equal(config.resultMax, 5);
+  assert.equal(ADMIN_SETTING_KEYS.includes("SEARCH_DISPLAY"), false);
+  assert.equal(ADMIN_SETTING_KEYS.includes("GCP_PROJECT_ID"), false);
+  assert.throws(() => validateAdminPatch({ SEARCH_DISPLAY: "10" }), /ADMIN_SETTING_NOT_ALLOWED/u);
   assert.throws(() => createSearchAdapterRegistry({ adapters: { gemini_a6: {} } }), SearchAdapterUnsupportedError);
 });
 

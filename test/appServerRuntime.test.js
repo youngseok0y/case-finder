@@ -155,6 +155,8 @@ test("app-server runtime preserves the AO session contract and routes dynamic to
       contentItems: [{ type: "inputText", text: "provider result" }],
       success: true,
     });
+    await session.close();
+    assert.deepEqual(await fs.readdir(path.join(root, "sessions")), []);
   } finally {
     await runtime.close();
     await fs.rm(root, { recursive: true, force: true });

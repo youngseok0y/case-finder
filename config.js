@@ -10,7 +10,6 @@ if (process.env.CASE_FINDER_SKIP_DOTENV !== "1") {
   loadDotenv({ path: process.env.CASE_FINDER_ENV_PATH || runtimePaths.envPath, quiet: true });
 }
 
-const configuredSearchDisplay = Number.parseInt(process.env.SEARCH_DISPLAY || "20", 10);
 const configuredSearchAdapter = process.env.SEARCH_ADAPTER || "luna_native";
 if (!new Set(["gemini_d", "luna_native"]).has(configuredSearchAdapter)) {
   throw new Error(`PRODUCT_ADAPTER_UNSUPPORTED:${configuredSearchAdapter}`);
@@ -38,14 +37,11 @@ export const config = Object.freeze({
   codexTimeoutMs: Math.max(30_000, Number.parseInt(process.env.CODEX_TIMEOUT_MS || "120000", 10)),
   runtimePaths,
   searchConcurrency: 5,
-  searchDisplay: Number.isInteger(configuredSearchDisplay)
-    ? Math.min(100, Math.max(1, configuredSearchDisplay))
-    : 20,
+  searchDisplay: 20,
   lawSearchDisplay: 5,
   candidateMax: 20,
   previewMissingPenalty: 2,
   caseNumberMax: 5,
   lawMax: 4,
   resultMax: 5,
-  mcpBinPath: path.join(rootDir, "node_modules", ".bin", "korean-law-mcp"),
 });

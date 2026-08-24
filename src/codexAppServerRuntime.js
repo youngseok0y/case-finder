@@ -173,11 +173,12 @@ function forbiddenItemType(value) {
 }
 
 class CodexAppServerSession {
-  constructor(runtime, { threadId, turnId, sessionId, timeoutMs, requestedModel, modelResolution }) {
+  constructor(runtime, { threadId, turnId, sessionId, sessionDir, timeoutMs, requestedModel, modelResolution }) {
     this.runtime = runtime;
     this.threadId = threadId;
     this.turnId = turnId;
     this.sessionId = sessionId || threadId;
+    this.sessionDir = sessionDir || "";
     this.timeoutMs = timeoutMs;
     this.queue = [];
     this.waiters = [];
@@ -194,6 +195,7 @@ class CodexAppServerSession {
     this.usage = null;
     this.requestedModel = modelText(requestedModel);
     this.modelResolution = modelResolution || normalizeModelResolution({}, this.requestedModel);
+    this.cleanupPromise = null;
   }
 
   #enqueue(value) {
@@ -206,7 +208,14 @@ class CodexAppServerSession {
     if (this.ended) return;
     this.ended = true;
     clearTimeout(this.timer);
+    this.runtime.unregisterSession(this);
+    void this.cleanup().catch(() => {});
     for (const waiter of this.waiters.splice(0)) waiter.resolve(null);
+  }
+
+  cleanup() {
+    if (!this.cleanupPromise) this.cleanupPromise = this.runtime.cleanupSessionDirectory(this.sessionDir);
+    return this.cleanupPromise;
   }
 
   #fail(error) {
@@ -216,7 +225,10 @@ class CodexAppServerSession {
     this.ended = true;
     clearTimeout(this.timer);
     this.runtime.unregisterSession(this);
-    if (shouldInterrupt) void this.runtime.interruptTurn(this);
+    void (shouldInterrupt ? this.runtime.interruptTurn(this) : Promise.resolve())
+      .catch(() => {})
+      .then(() => this.cleanup())
+      .catch(() => {});
     for (const waiter of this.waiters.splice(0)) waiter.reject(error);
   }
 
@@ -321,7 +333,8 @@ class CodexAppServerSession {
     this.closed = true;
     clearTimeout(this.timer);
     this.runtime.unregisterSession(this);
-    if (shouldInterrupt) void this.runtime.interruptTurn(this);
+    if (shouldInterrupt) await this.runtime.interruptTurn(this).catch(() => {});
+    await this.cleanup().catch(() => {});
     for (const waiter of this.waiters.splice(0)) waiter.resolve(null);
   }
 }
@@ -446,14 +459,19 @@ export class CodexAppServerRuntime {
         dynamicTools: this.dynamicTools,
       }, this.requestTimeoutMs);
     } catch (error) {
+      await this.cleanupSessionDirectory(sessionDir).catch(() => {});
       throw this.#classifyExecutionError(error, "CODEX_APP_SERVER_THREAD_START_FAILED");
     }
     const threadId = thread?.thread?.id || thread?.id;
-    if (!threadId) throw runtimeError("CODEX_APP_SERVER_THREAD_ID_MISSING", "thread/start returned no id");
+    if (!threadId) {
+      await this.cleanupSessionDirectory(sessionDir).catch(() => {});
+      throw runtimeError("CODEX_APP_SERVER_THREAD_ID_MISSING", "thread/start returned no id");
+    }
     const session = new CodexAppServerSession(this, {
       threadId,
       turnId: "pending",
       sessionId: threadId,
+      sessionDir,
       timeoutMs: Math.max(1, Number(this.sessionTimeoutMs)),
       requestedModel: model,
       modelResolution: normalizeModelResolution(thread, model),
@@ -482,6 +500,14 @@ export class CodexAppServerRuntime {
 
   unregisterSession(session) {
     if (this.sessions.get(String(session.threadId)) === session) this.sessions.delete(String(session.threadId));
+  }
+
+  async cleanupSessionDirectory(sessionDir) {
+    if (!sessionDir) return;
+    const baseDir = path.resolve(this.baseDir);
+    const target = path.resolve(sessionDir);
+    if (!target.startsWith(`${baseDir}${path.sep}`)) return;
+    await fs.rm(target, { recursive: true, force: true });
   }
 
   respondToServerRequest(id, result, error = null) {

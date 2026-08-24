@@ -51,8 +51,16 @@ test("F1 AO session forwards authoritative fallback as MODEL_FALLBACK", async ()
   const events = [];
   const ao = createCodexNativeAo({
     gateway: { ledger, execute: async () => ({}) },
-    createSession: async () => ({
+    createSession: async ({ onDelegatedToolResult }) => {
+      let searched = false;
+      return {
       async next() {
+        if (!searched) {
+          searched = true;
+          const args = { domain: "precedent", query: "fallback fixture" };
+          onDelegatedToolResult({ name: "search_decisions", arguments: args, result: { items: [] } });
+          return { type: "mcp_tool_call", delegated: true, name: "search_decisions", arguments: args, call_id: "search-1" };
+        }
         return {
           type: "final",
           selection: { selected: [], intro: "" },
@@ -64,7 +72,8 @@ test("F1 AO session forwards authoritative fallback as MODEL_FALLBACK", async ()
         };
       },
       async close() {},
-    }),
+      };
+    },
   });
   const result = await ao.run("fallback fixture", { onProgress: (event) => events.push(event) });
   assert.equal(result.modelResolution.fallbackApplied, true);

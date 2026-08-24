@@ -7,9 +7,7 @@ export const ADMIN_SETTING_KEYS = Object.freeze([
   "GEMINI_API_KEY",
   "LAW_OC",
   "CODEX_TIMEOUT_MS",
-  "GCP_PROJECT_ID",
   "PORT",
-  "SEARCH_DISPLAY",
 ]);
 
 const SECRET_KEYS = new Set(["GEMINI_API_KEY", "LAW_OC"]);
@@ -44,14 +42,6 @@ function validateValue(key, rawValue) {
     const number = Number.parseInt(value, 10);
     if (!Number.isInteger(number) || number < 1 || number > 65_535) throw new Error(`ADMIN_SETTING_INVALID:${key}`);
     return String(number);
-  }
-  if (key === "SEARCH_DISPLAY") {
-    const number = Number.parseInt(value, 10);
-    if (!Number.isInteger(number) || number < 1 || number > 100) throw new Error(`ADMIN_SETTING_INVALID:${key}`);
-    return String(number);
-  }
-  if (key === "GCP_PROJECT_ID" && value && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(value)) {
-    throw new Error(`ADMIN_SETTING_INVALID:${key}`);
   }
   return value;
 }
@@ -108,12 +98,10 @@ export function adminSettingsView() {
     configured: {
       geminiApiKey: Boolean(config.geminiApiKey),
       lawOc: Boolean(config.lawOc),
-      gcpProjectId: Boolean(process.env.GCP_PROJECT_ID),
     },
     values: {
       codexTimeoutMs: config.codexTimeoutMs,
       port: config.port,
-      searchDisplay: config.searchDisplay,
     },
     restartRequired: true,
   };

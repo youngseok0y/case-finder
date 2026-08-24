@@ -94,12 +94,14 @@ export class LegalToolGateway {
     ledger = createEvidenceLedger(),
     telemetry = createTelemetry({ provider: "unknown" }),
     safety = createSafetyController(),
+    signal = null,
   } = {}) {
     this.callTool = callTool;
     this.normalizeResult = normalizeResult;
     this.ledger = ledger;
     this.telemetry = telemetry;
     this.safety = safety;
+    this.signal = signal;
     this.trace = [];
   }
 
@@ -148,7 +150,7 @@ export class LegalToolGateway {
     this.safety.recordLegalToolCall();
     this.telemetry.recordToolCall(name);
     this.trace.push({ accepted: true, name, args: { ...args } });
-    const raw = await this.callTool(name, args);
+    const raw = await this.callTool(name, args, { signal: this.signal });
     const normalized = await this.normalizeResult(name, raw, args);
 
     if (name === "search_decisions" && !normalized.isError) {

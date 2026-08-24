@@ -66,17 +66,6 @@ function sendSse(response, event, payload) {
   response.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
 }
 
-async function legacyReadBody(request) {
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of request) {
-    size += chunk.length;
-    if (size > maxBodyBytes) throw new Error("요청 본문은 10,000바이트를 넘을 수 없습니다.");
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
-
 async function readBody(request) {
   const declaredLength = Number(request.headers["content-length"]);
   if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) {
@@ -177,7 +166,6 @@ async function healthPayload({
   let luna = {
     configured: false,
     codexAvailable: false,
-    codeModeHostAvailable: false,
     transport: "app_server",
     dynamicTools: false,
     version: "",
@@ -188,7 +176,6 @@ async function healthPayload({
       luna = {
         configured: true,
         codexAvailable: runtime.available,
-        codeModeHostAvailable: false,
         transport: runtime.transport,
         dynamicTools: runtime.dynamicTools,
         version: runtime.version,
@@ -199,7 +186,6 @@ async function healthPayload({
       luna = {
         configured: true,
         codexAvailable: false,
-        codeModeHostAvailable: false,
         transport: "app_server",
         dynamicTools: false,
         version: "",
@@ -255,14 +241,14 @@ function responseForResult({ query, route, result, stage }) {
   };
 }
 
-async function executeQuery(query, onProgress = () => {}) {
+async function executeQuery(query, onProgress = () => {}, { abortSignal = null } = {}) {
   const progress = createProgressReporter(onProgress);
   progress.emit("SEARCH_STARTED");
   const route = routeQuery(query, config.caseNumberMax);
   progress.emit("ROUTE_IDENTIFIED", { route: route.kind, ...route.telemetry });
 
   if (route.kind === "direct") {
-    const lookedUp = await lookupDirect(query, route);
+    const lookedUp = await lookupDirect(query, route, { abortSignal });
     const validated = await validateDirectResult(lookedUp);
     progress.emit("DETAIL_VERIFIED", {
       route: "direct",
@@ -279,6 +265,7 @@ async function executeQuery(query, onProgress = () => {}) {
   const adapter = defaultSearchAdapterRegistry.resolve(config.searchAdapter);
   const adapterResult = await adapter.runNaturalQuery(query, {
     onProgress: (event, details) => progress.emit(event, { ...details, route: "natural" }),
+    abortSignal,
   });
   const validated = await validateNaturalResult(adapterResult);
   const publicResult = assertResultContract(validated);
@@ -428,10 +415,16 @@ async function handleAsk(request, response, stream = false, executeQueryImpl = e
     response.flushHeaders?.();
   }
 
+  const abortController = new AbortController();
+  const abortRequest = () => {
+    if (!response.writableFinished) abortController.abort();
+  };
+  request.once("aborted", abortRequest);
+  response.once("close", abortRequest);
   try {
     const result = await executeQueryImpl(query, (event) => {
       if (stream) sendSse(response, event.event, event);
-    });
+    }, { abortSignal: abortController.signal });
     if (stream) {
       sendSse(response, "FINAL", result.payload);
       response.end();
@@ -439,6 +432,7 @@ async function handleAsk(request, response, stream = false, executeQueryImpl = e
       sendJson(response, result.status, result.payload);
     }
   } catch (error) {
+    if (error?.code === "ABORTED" || request.aborted || response.destroyed) return;
     const failure = errorPayload(error);
     await logError(runtimeFailure(error) ? "Luna Native runtime failure" : "HTTP 요청 처리 실패", error);
     if (stream) {
@@ -447,6 +441,9 @@ async function handleAsk(request, response, stream = false, executeQueryImpl = e
     } else {
       sendJson(response, failure.status, failure.payload);
     }
+  } finally {
+    request.removeListener("aborted", abortRequest);
+    response.removeListener("close", abortRequest);
   }
 }
 

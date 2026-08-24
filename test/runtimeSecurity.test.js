@@ -60,3 +60,26 @@ test("managed MCP uses the packaged private Node executable", () => {
   assert.deepEqual(result.args, [upstreamEntry]);
   assert.equal(result.env.LAW_OC, "test-law");
 });
+
+test("MCP child environment keeps legal credentials and strips provider secrets", () => {
+  const rootDir = "C:\\Case Finder\\app";
+  const binPath = `${rootDir}\\node_modules\\.bin\\korean-law-mcp`;
+  const result = buildMcpServerParameters({
+    platform: "linux",
+    source: {
+      PATH: "/usr/bin",
+      SYSTEMROOT: "/system",
+      LAW_OC: "law-from-source",
+      GEMINI_API_KEY: "gemini-secret",
+      TEST_SECRET: "test-secret",
+    },
+    rootDir,
+    lawOc: "law-from-source",
+    fsImpl: { existsSync(value) { return value === binPath; } },
+  });
+  assert.equal(result.env.LAW_OC, "law-from-source");
+  assert.equal(result.env.PATH, "/usr/bin");
+  assert.equal(result.env.SYSTEMROOT, "/system");
+  assert.equal("GEMINI_API_KEY" in result.env, false);
+  assert.equal("TEST_SECRET" in result.env, false);
+});

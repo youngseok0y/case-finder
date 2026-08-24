@@ -23,7 +23,9 @@ function argument(name, fallback = "") {
 }
 
 async function main() {
-  const stageRoot = path.resolve(argument("--stage"));
+  const stageArgument = argument("--stage");
+  if (!stageArgument) throw new Error("missing required --stage");
+  const stageRoot = path.resolve(stageArgument);
   const level = argument("--level", "all");
   const levels = level === "all"
     ? Object.keys(LEVELS).map(Number)

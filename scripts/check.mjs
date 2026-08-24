@@ -5,14 +5,14 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-async function jsFiles(directory) {
+async function filesWithExtension(directory, extension) {
   const root = path.join(ROOT, directory);
   const output = [];
   async function visit(current) {
     for (const entry of await fs.readdir(current, { withFileTypes: true })) {
       const file = path.join(current, entry.name);
       if (entry.isDirectory()) await visit(file);
-      else if (entry.isFile() && file.endsWith(".js")) output.push(file);
+      else if (entry.isFile() && file.endsWith(extension)) output.push(file);
     }
   }
   await visit(root);
@@ -21,11 +21,12 @@ async function jsFiles(directory) {
 
 const files = [
   path.join(ROOT, "config.js"),
-  ...(await jsFiles("src")),
-  ...(await jsFiles("public")),
-  ...(await jsFiles("packaging")),
+  ...(await filesWithExtension("src", ".js")),
+  ...(await filesWithExtension("public", ".js")),
+  ...(await filesWithExtension("scripts", ".mjs")),
+  ...(await filesWithExtension("packaging", ".mjs")),
   ...(await fs.readdir(path.join(ROOT, "test"))).filter((file) => file.endsWith(".test.js")).map((file) => path.join(ROOT, "test", file)),
 ];
 
 for (const file of files.sort()) execFileSync(process.execPath, ["--check", file], { stdio: "inherit" });
-console.log(`Checked ${files.length} JavaScript files.`);
+console.log(`Checked ${files.length} JavaScript and module files.`);
