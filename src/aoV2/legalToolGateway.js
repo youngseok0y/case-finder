@@ -1,6 +1,6 @@
 import { config } from "../../config.js";
 import { callTool as defaultCallTool } from "../mcpClient.js";
-import { parseDecisionDetail, parseDecisionSearchResults, parseLawSearchResults, toolText } from "../directLookup.js";
+import { parseDecisionDetail, parseDecisionSearchResults, parseLawSearchResults, toolText } from "../legalMcpParser.js";
 import { createEvidenceLedger } from "./evidenceLedger.js";
 import { createSafetyController } from "./safety.js";
 import { createTelemetry } from "./telemetry.js";
