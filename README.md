@@ -12,6 +12,7 @@ Case Finder is a local Fable-format legal precedent search application. It retri
 - Final cases require provider-observed identity and successful detail verification
 - Luna keeps `EvidenceLedger`, `FinalSelectionGate`, and verified-only output
 - Provider failures are not silently changed to another adapter
+- Codex authentication is isolated in the product-owned `state/codex-home` and uses file credentials only
 
 ## Requirements
 
@@ -30,7 +31,13 @@ npm run verify
 
 The server binds to `127.0.0.1`. In a source checkout, `start.bat` uses the local `node.exe` on `PATH` when the packaged runtime is absent. `npm run verify` performs the syntax check and the network/model-free product test suite. `npm run verify:managed -- --skip-query` checks the packaged runtime contract without making a live legal query.
 
-For development-only Codex re-authentication, run `codex-login.bat` from the repository root. It requires local Node.js `>=24.14.0 <25` and the Windows x64 Codex package installed by `npm ci`; it does not copy, parse, or delete authentication files. The helper is checkout-specific and is not the managed installer entrypoint.
+For development-only Codex re-authentication, run `codex-login.bat` from the repository root. It requires local Node.js `>=24.14.0 <25` and the Windows x64 Codex package installed by `npm ci`; it always uses `<repo>\state\codex-home`, forces `cli_auth_credentials_store = "file"`, and never inherits, imports, or falls back to the user's global Codex authentication. The helper is checkout-specific and is not the managed installer entrypoint.
+
+## Codex authentication isolation
+
+Case Finder uses `config.codexHomePath`, which is `state/codex-home` under the install root. Case Finder login, logout, account switching, cancellation, token refresh, and Luna app-server sessions use only that dedicated namespace. A missing or unsafe dedicated home, a failed `config.toml` preparation, or an effective credential store other than `file` stops the app-server instead of falling back to `%USERPROFILE%\.codex` or `$HOME/.codex`.
+
+Case Finder does not import or reuse an existing Codex CLI/Desktop/IDE login. Users must sign in separately. Global Codex authentication files and tokens are not read, copied, modified, deleted, or exposed in the UI or logs.
 
 ## Configuration
 

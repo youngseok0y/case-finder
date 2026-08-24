@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "../config.js";
 import { buildCodexChildEnv } from "./codexEnv.js";
+import { prepareCodexHome } from "./codexAuthIsolation.js";
 
 const CODEX_VERSION = "0.147.0";
 
@@ -58,10 +59,13 @@ export async function resolvePackagedCodexRuntime({
   };
 }
 
-export function buildCodexAppServerEnv(source = process.env) {
-  const env = buildCodexChildEnv(source);
+export async function buildCodexAppServerEnv(
+  source = process.env,
+  { codexHomePath = config.codexHomePath, fsImpl = fs, platform = process.platform } = {},
+) {
+  const prepared = await prepareCodexHome(codexHomePath, { source, fsImpl, platform });
+  const env = buildCodexChildEnv(source, { codexHomePath: prepared.codexHomePath });
   if (!env.HOME) env.HOME = env.USERPROFILE || `${env.HOMEDRIVE || ""}${env.HOMEPATH || ""}`;
-  if (!env.CODEX_HOME && env.HOME) env.CODEX_HOME = path.join(env.HOME, ".codex");
   return env;
 }
 

@@ -45,6 +45,14 @@ class FakeChild extends EventEmitter {
       this.#send({ jsonrpc: "2.0", id: message.id, result: { capabilities: { experimentalApi: true } } });
       return;
     }
+    if (message.method === "config/read") {
+      this.#send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: { config: { additional: { cli_auth_credentials_store: "file" } } },
+      });
+      return;
+    }
     if (message.method === "thread/start") {
       this.#send({ jsonrpc: "2.0", id: message.id, result: { thread: { id: "thread-1" } } });
       return;
@@ -118,6 +126,8 @@ test("app-server runtime preserves the AO session contract and routes dynamic to
   const collector = createCodexUsageCollector({ statePath: path.join(root, "state", "codex-usage.json") });
   const runtime = new CodexAppServerRuntime({
     baseDir: path.join(root, "sessions"),
+    codexHomePath: path.join(root, "codex-home"),
+    configCwd: root,
     resolveRuntime: async () => ({ executablePath: "fake-codex", packageName: "fake", target: "fake", version: "0.147.0" }),
     spawnImpl: () => child,
     usageCollector: collector,

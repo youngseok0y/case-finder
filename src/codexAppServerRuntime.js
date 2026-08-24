@@ -10,6 +10,7 @@ import {
   buildCodexAppServerEnv,
   resolvePackagedCodexRuntime,
 } from "./codexRuntimeResolver.js";
+import { assertFileCredentialStore } from "./codexAuthIsolation.js";
 import { CodexUsageCollector, normalizeCodexTokenUsage } from "./codexUsage.js";
 import { LEGAL_DYNAMIC_TOOLS, LEGAL_TOOL_NAMES } from "./aoV2/legalToolDefinitions.js";
 
@@ -342,6 +343,8 @@ class CodexAppServerSession {
 export class CodexAppServerRuntime {
   constructor({
     baseDir = config.codexWorkdir,
+    codexHomePath = config.codexHomePath,
+    configCwd = ROOT_DIR,
     source = process.env,
     spawnImpl = spawn,
     resolveRuntime = resolvePackagedCodexRuntime,
@@ -352,6 +355,8 @@ export class CodexAppServerRuntime {
     dynamicTools = LEGAL_DYNAMIC_TOOLS,
   } = {}) {
     this.baseDir = baseDir;
+    this.codexHomePath = codexHomePath;
+    this.configCwd = configCwd;
     this.source = source;
     this.spawnImpl = spawnImpl;
     this.resolveRuntime = resolveRuntime;
@@ -376,10 +381,9 @@ export class CodexAppServerRuntime {
     this.startPromise = (async () => {
       this.runtime = await this.resolveRuntime();
       await fs.mkdir(this.baseDir, { recursive: true });
+      const childEnv = await buildCodexAppServerEnv(this.source, { codexHomePath: this.codexHomePath });
       let child;
       try {
-        const childEnv = buildCodexAppServerEnv(this.source);
-        if (childEnv.CODEX_HOME) await fs.mkdir(childEnv.CODEX_HOME, { recursive: true });
         child = this.spawnImpl(this.runtime.executablePath, ["app-server", "--listen", "stdio://"], {
           cwd: ROOT_DIR,
           env: childEnv,
@@ -401,6 +405,16 @@ export class CodexAppServerRuntime {
           clientInfo: CLIENT_INFO,
         }, this.requestTimeoutMs);
         client.notify("initialized");
+        let effectiveConfig;
+        try {
+          effectiveConfig = await client.request("config/read", {
+            includeLayers: false,
+            cwd: this.configCwd,
+          }, this.requestTimeoutMs);
+        } catch (error) {
+          throw runtimeError("CODEX_AUTH_ISOLATION_UNSAFE", "effective Codex credential store could not be verified", error);
+        }
+        assertFileCredentialStore(effectiveConfig);
       } catch (error) {
         await client.close().catch(() => {});
         this.client = null;

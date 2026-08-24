@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildMcpServerParameters, MCP_CALL_TIMEOUT, runMcpCall, withMcpTimeout } from "../src/mcpClient.js";
 import { isTrustedLocalHost, sameOrigin } from "../src/server.js";
+import { buildLegalMcpEnv } from "../src/runtimeEnv.js";
 
 function request(headers, localPort = 3300) {
   return { headers, socket: { localPort } };
@@ -82,4 +83,12 @@ test("MCP child environment keeps legal credentials and strips provider secrets"
   assert.equal(result.env.SYSTEMROOT, "/system");
   assert.equal("GEMINI_API_KEY" in result.env, false);
   assert.equal("TEST_SECRET" in result.env, false);
+});
+
+test("Case Finder child environments do not inherit ambient CODEX_HOME", () => {
+  const env = buildLegalMcpEnv({
+    CODEX_HOME: "C:\\Users\\Test\\.codex",
+    LAW_OC: "law-from-source",
+  }, "law-from-source");
+  assert.equal("CODEX_HOME" in env, false);
 });

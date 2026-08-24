@@ -65,7 +65,7 @@
   "notes": [
     "The installer provisions the private Node runtime and the pinned Codex app-server plus platform package under app/node_modules/.",
     "Final execution uses runtime/node/node.exe and never runs npm ci; dependencies are installed during packaging.",
-    "luna_native uses a persistent Codex app-server with fresh ephemeral query threads and preserves the user's existing Codex authentication source without copying auth files.",
+    "luna_native uses a persistent Codex app-server with fresh ephemeral query threads and a product-owned state/codex-home authentication namespace; it never inherits, imports, or falls back to a user-global Codex authentication store.",
     "The normal product path resolves only the packaged Codex app-server runtime and uses the dynamic legal MCP tool surface."
   ]
 }

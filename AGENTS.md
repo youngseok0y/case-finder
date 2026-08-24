@@ -11,6 +11,7 @@ Read `README.md` before changing the project. The repository is the production c
 - Preserve provider-only source fields, verified-only final cases, compound identity behavior, `EvidenceLedger`, and `FinalSelectionGate`.
 - Luna failures must not silently fall back to Gemini.
 - Do not expose secrets, private reasoning, system prompts, raw tool planning, or auth tokens.
+- Case Finder Codex authentication must remain isolated in `config.codexHomePath` and must never inherit, import, mutate, or fall back to a user-global Codex authentication store.
 - Do not add or change runtime dependencies without explicit approval.
 
 ## Scope and verification

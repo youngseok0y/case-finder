@@ -13,7 +13,6 @@ const CODEX_CHILD_ENV_KEYS = Object.freeze([
   "HOMEPATH",
   "HOME",
   "SYSTEMDRIVE",
-  "CODEX_HOME",
 ]);
 
 export function buildCodexChildEnv(source = process.env, { legalMcpLogPath = "", codexHomePath = "" } = {}) {

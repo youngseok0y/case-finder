@@ -13,7 +13,6 @@ const RUNTIME_ENV_KEYS = Object.freeze([
   "HOMEPATH",
   "HOME",
   "SYSTEMDRIVE",
-  "CODEX_HOME",
 ]);
 
 export function buildRuntimeEnv(source = {}, extras = {}) {

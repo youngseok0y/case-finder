@@ -38,7 +38,14 @@ if not exist "%CODEX_EXE%" (
 )
 
 if not defined HOME set "HOME=%USERPROFILE%"
-if not defined CODEX_HOME set "CODEX_HOME=%USERPROFILE%\.codex"
+set "CODEX_HOME=%CASEFINDER_ROOT%state\codex-home"
+"%NODE_EXE%" "%CASEFINDER_ROOT%scripts\prepare-codex-home.mjs"
+if errorlevel 1 (
+    echo [ERROR] The dedicated Case Finder Codex home could not be prepared.
+    echo Global Codex authentication was not used.
+    pause
+    exit /b 1
+)
 
 echo.
 echo ========================================
