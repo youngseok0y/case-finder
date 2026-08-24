@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createCodexNativeAo } from "../src/aoV2/providers/codexNativeAo.js";
 import { createEvidenceLedger } from "../src/aoV2/evidenceLedger.js";
-import { buildLunaResultItems } from "../src/searchAdapters/lunaNativeAdapter.js";
+import { buildLunaResultItems, createLunaNativeAdapter } from "../src/searchAdapters/lunaNativeAdapter.js";
 import { toResultContract } from "../src/searchAdapters/resultContract.js";
 
 const RESULT_METADATA = {
@@ -130,6 +130,29 @@ test("accepted search plus detail verification preserves successful final select
   assert.equal(ledger.getCase("2020다1234").detailVerified, true);
   assert.deepEqual(contract.selected, [{ caseNumber: "2020다1234", match: "direct" }]);
   assert.equal(contract.terminalState, "SUCCESS");
+});
+
+test("Luna adapter does not expose unverified items on the NO_RESULT boundary", async () => {
+  const ledger = createEvidenceLedger({ provider: "no-result-boundary-fixture" });
+  ledger.recordDecisionSearch({
+    domain: "precedent",
+    query: "unverified fixture",
+    items: [{ id: "case-2", caseNumber: "2020다5678" }],
+  });
+  assert.deepEqual(buildLunaResultItems({
+    selected: [{ case_no: "2020다5678", match: "direct" }],
+  }, ledger), []);
+
+  const adapter = createLunaNativeAdapter({
+    run: async () => ({
+      selected: [{ case_no: "2020다5678", match: "direct" }],
+      items: [{ status: "validation_failed", caseNumber: "2020다5678" }],
+      candidateCaseNumbers: ["2020다5678"],
+    }),
+  });
+  const result = await adapter.runNaturalQuery("unverified fixture");
+  assert.deepEqual(result.items, []);
+  assert.equal(result.terminalState, "NO_RESULT");
 });
 
 test("forbidden tool remains blocked before final selection", async () => {

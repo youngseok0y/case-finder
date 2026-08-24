@@ -108,26 +108,18 @@ function nativeDecisionLink(domain, providerId) {
 
 export function buildLunaResultItems(result = {}, ledger = null) {
   if (Array.isArray(result.items) && result.items.length > 0) {
-    return result.items.map((item) => ({ ...item, lawReferences: [] }));
+    return result.items
+      .filter((item) => item?.status === "verified")
+      .map((item) => ({ ...item, lawReferences: [] }));
   }
   if (!ledger || typeof ledger.getCase !== "function" || !Array.isArray(result.selected)) return [];
-  return result.selected.map((selection) => {
+  return result.selected.flatMap((selection) => {
     const requestedCaseNumber = selection?.case_no || selection?.caseNumber || "";
     const candidate = ledger.getCase(requestedCaseNumber);
-    if (!candidate) {
-      return {
-        status: "validation_failed",
-        providerId: "",
-        caseNumber: String(requestedCaseNumber),
-        providerCaseNumber: String(requestedCaseNumber),
-        candidateCaseNumbers: [String(requestedCaseNumber)],
-        link: "",
-        match: selection?.match || "related",
-      };
-    }
+    if (!candidate || !candidate.detailVerified) return [];
     const providerCaseNumber = candidate.rawCaseNumber || candidate.caseNumber;
-    return {
-      status: candidate.detailVerified ? "verified" : "validation_failed",
+    return [{
+      status: "verified",
       providerId: candidate.id || "",
       caseNumber: candidate.caseNumber,
       providerCaseNumber,
@@ -148,7 +140,7 @@ export function buildLunaResultItems(result = {}, ledger = null) {
       },
       lawReferences: [],
       match: selection?.match || "related",
-    };
+    }];
   });
 }
 

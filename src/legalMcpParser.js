@@ -72,7 +72,7 @@ export function parseDecisionDetail(rawText) {
   const text = decodeBasicHtml(rawText);
   const sections = {};
   const sectionPattern = new RegExp(
-    `(?:^|\n)\s*(${DETAIL_SECTIONS.join("|")})\s*:\s*([\s\S]*?)(?=\n\s*(?:${DETAIL_SECTIONS.join("|")})\s*:|$)`,
+    String.raw`(?:^|\n)\s*(${DETAIL_SECTIONS.join("|")})\s*:\s*([\s\S]*?)(?=\n\s*(?:${DETAIL_SECTIONS.join("|")})\s*:|$)`,
     "g",
   );
   for (const match of text.matchAll(sectionPattern)) {
