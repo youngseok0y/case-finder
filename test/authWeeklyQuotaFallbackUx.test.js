@@ -112,7 +112,7 @@ test("F3 Pro plan with actual Luna to Terra resolution satisfies the toast condi
   });
 });
 
-test("Admin and Index operating UI consume weekly normalized fields only", async () => {
+test("Admin and Index operating UI consume the shared dynamic quota fields", async () => {
   const [adminHtml, adminJs, indexHtml, appJs] = await Promise.all([
     fs.readFile(path.join(ROOT, "public", "admin.html"), "utf8"),
     fs.readFile(path.join(ROOT, "public", "admin.js"), "utf8"),
@@ -120,16 +120,19 @@ test("Admin and Index operating UI consume weekly normalized fields only", async
     fs.readFile(path.join(ROOT, "public", "app.js"), "utf8"),
   ]);
   assert.match(adminHtml, /연결된 계정/u);
-  assert.match(adminHtml, /이번 주 사용량/u);
+  assert.match(adminHtml, /<dt>사용량<\/dt>/u);
+  assert.doesNotMatch(adminHtml, /이번 주 사용량/u);
   assert.match(adminHtml, /다음 초기화/u);
   assert.doesNotMatch(adminHtml, /로컬 token usage/iu);
   assert.doesNotMatch(adminHtml, /rate limit/iu);
   assert.match(adminJs, /fetch\("\/api\/codex\/account"/u);
-  assert.match(adminJs, /weekly\.resetLabel/u);
+  assert.match(adminJs, /quota\.resetLabel/u);
+  assert.match(adminJs, /quota\.windowLabel/u);
   assert.match(adminJs, /window\.open\("", "codex-login"/u);
   assert.doesNotMatch(adminJs, /\/api\/codex\/(usage|rate-limits)/u);
   assert.doesNotMatch(adminJs, /resetsAt|43200분|300분|input_tokens|reasoning_tokens/iu);
-  assert.match(indexHtml, /Codex 주간 사용량/u);
+  assert.match(indexHtml, /Codex 사용량/u);
+  assert.doesNotMatch(indexHtml, /Codex 주간 사용량/u);
   assert.match(indexHtml, /id="toast"/u);
   assert.match(appJs, /payload\?\.fallbackApplied !== true/u);
   assert.match(appJs, /payload\?\.requestedModel !== "gpt-5\.6-luna"/u);

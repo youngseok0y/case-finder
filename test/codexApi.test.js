@@ -20,17 +20,20 @@ test("Codex account and usage routes expose safe app-server metadata", async () 
     planType: "pro",
     type: "chatgpt",
     authMode: "chatgpt",
-    codexWeekly: {
+    codexQuota: {
       available: true,
       usedPercent: 37,
       remainingPercent: 63,
+      windowDurationMins: 10080,
+      windowKind: "weekly",
+      windowLabel: "주간",
       resetsAt: 1789889511,
       resetLabel: "2026년 8월 28일 오후 3:20",
     },
   };
   const manager = {
     async read() { calls.push("read"); return account; },
-    async readRateLimits() { calls.push("rate"); return { source: "app_server", codexWeekly: account.codexWeekly }; },
+    async readRateLimits() { calls.push("rate"); return { source: "app_server", codexQuota: account.codexQuota }; },
     async startLogin(type) { calls.push(`login:${type}`); return { type, loginId: "login-1", authUrl: "https://example.test/login", source: "app_server" }; },
     async cancelLogin(loginId) { calls.push(`cancel:${loginId}`); return { cancelled: true, source: "app_server" }; },
     async logout() { calls.push("logout"); return { loggedIn: false, requiresOpenaiAuth: true, email: "", planType: "unknown", type: "", authMode: "logged_out" }; },
@@ -56,8 +59,10 @@ test("Codex account and usage routes expose safe app-server metadata", async () 
     assert.equal(accountResponse.status, 200);
     assert.equal(accountBody.email, "user@example.com");
     assert.equal("accessToken" in accountBody, false);
-    assert.equal(accountBody.codexWeekly.remainingPercent, 63);
-    assert.equal("resetsAt" in accountBody.codexWeekly, false);
+    assert.equal(accountBody.codexQuota.remainingPercent, 63);
+    assert.equal(accountBody.codexQuota.windowDurationMins, 10080);
+    assert.equal(accountBody.codexQuota.windowLabel, "주간");
+    assert.equal("resetsAt" in accountBody.codexQuota, false);
 
     const usageResponse = await fetch(`http://127.0.0.1:${port}/api/codex/usage`);
     const usageBody = await usageResponse.json();
@@ -65,7 +70,8 @@ test("Codex account and usage routes expose safe app-server metadata", async () 
 
     const rateResponse = await fetch(`http://127.0.0.1:${port}/api/codex/rate-limits`);
     const rateBody = await rateResponse.json();
-    assert.equal(rateBody.codexWeekly.remainingPercent, 63);
+    assert.equal(rateBody.codexQuota.remainingPercent, 63);
+    assert.equal(rateBody.codexQuota.windowKind, "weekly");
     assert.equal("limits" in rateBody, false);
 
     const loginResponse = await fetch(`http://127.0.0.1:${port}/api/codex/login/start`, {
@@ -94,13 +100,13 @@ test("Codex account and usage routes expose safe app-server metadata", async () 
   }
 });
 
-test("public health exposes only normalized Codex weekly status, never account email", async () => {
+test("public health exposes only normalized Codex quota status, never account email", async () => {
   const manager = {
     async read() {
       return {
         loggedIn: true,
         email: "user@example.com",
-        codexWeekly: { available: true, remainingPercent: 63 },
+        codexQuota: { available: true, remainingPercent: 63, windowKind: "monthly", windowLabel: "월간" },
       };
     },
   };
@@ -108,8 +114,10 @@ test("public health exposes only normalized Codex weekly status, never account e
     codexAccountManagerImpl: () => manager,
     codexRuntimeImpl: () => ({ inspect: async () => ({ available: true, transport: "app_server" }) }),
   });
-  assert.equal(health.quota.codexWeekly.available, true);
-  assert.equal(health.quota.codexWeekly.remainingPercent, 63);
+  assert.equal(health.quota.codexQuota.available, true);
+  assert.equal(health.quota.codexQuota.remainingPercent, 63);
+  assert.equal(health.quota.codexQuota.windowKind, "monthly");
+  assert.equal(health.quota.codexQuota.windowLabel, "월간");
   assert.equal("email" in health, false);
-  assert.equal("email" in health.quota.codexWeekly, false);
+  assert.equal("email" in health.quota.codexQuota, false);
 });

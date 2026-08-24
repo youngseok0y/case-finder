@@ -11,10 +11,12 @@ import {
 } from "../src/codexAppServerRuntime.js";
 import {
   createCodexAccountManager,
+  formatCodexQuotaWindowLabel,
   formatCodexResetLabel,
   normalizeCodexAccount,
+  normalizeCodexQuota,
   normalizeCodexRateLimits,
-  normalizeCodexWeeklyQuota,
+  selectCodexQuotaWindow,
 } from "../src/codexAccount.js";
 import { createLegalDynamicTools, LEGAL_TOOL_NAMES } from "../src/aoV2/legalToolDefinitions.js";
 import { createCodexUsageCollector, normalizeCodexTokenUsage } from "../src/codexUsage.js";
@@ -250,7 +252,10 @@ test("account manager exposes only safe account and rate-limit metadata", async 
   assert.equal(account.email, "user@example.com");
   assert.equal(account.planType, "pro");
   assert.equal("accessToken" in account, false);
-  assert.equal(limits.codexWeekly.available, false);
+  assert.equal(limits.codexQuota.available, true);
+  assert.equal(limits.codexQuota.windowDurationMins, 60);
+  assert.equal(limits.codexQuota.windowKind, "other");
+  assert.equal(limits.codexQuota.windowLabel, "1시간");
   assert.equal(login.loginId, "login-1");
   assert.equal(JSON.stringify(manager.snapshot()).includes("accessToken"), false);
   assert.deepEqual(normalizeCodexAccount({ account: { type: "chatgpt", email: null }, requiresOpenaiAuth: true }).loggedIn, true);
@@ -260,58 +265,136 @@ test("account manager exposes only safe account and rate-limit metadata", async 
   assert.equal(listeners.size, 0);
 });
 
-test("weekly quota normalization accepts only the seven-day window", () => {
+test("Codex quota normalization selects the preferred available window", () => {
   const reset = Date.parse("2026-08-28T06:20:00.000Z") / 1_000;
-  const w1 = normalizeCodexWeeklyQuota({
+  const weekly = normalizeCodexQuota({
     rateLimits: {
       primary: { usedPercent: 5, windowDurationMins: 300, resetsAt: reset },
       secondary: { usedPercent: 37, windowDurationMins: 10080, resetsAt: reset },
     },
   });
-  assert.deepEqual(w1, {
+  assert.deepEqual(weekly, {
     available: true,
     usedPercent: 37,
     remainingPercent: 63,
+    windowDurationMins: 10080,
+    windowKind: "weekly",
+    windowLabel: "주간",
     resetsAt: reset,
     resetLabel: "2026년 8월 28일 오후 3:20",
   });
 
-  const w2 = normalizeCodexWeeklyQuota({
+  const monthly = normalizeCodexQuota({
     rateLimits: {
-      primary: { usedPercent: 37, windowDurationMins: 10080, resetsAt: reset },
-      secondary: { usedPercent: 91, windowDurationMins: 43200, resetsAt: reset },
+      primary: { usedPercent: 12, windowDurationMins: 300, resetsAt: reset },
+      secondary: { usedPercent: 2, windowDurationMins: 43200, resetsAt: reset },
     },
   });
-  assert.equal(w2.remainingPercent, 63);
-  assert.equal(w2.resetsAt, reset);
+  assert.deepEqual(monthly, {
+    available: true,
+    usedPercent: 2,
+    remainingPercent: 98,
+    windowDurationMins: 43200,
+    windowKind: "monthly",
+    windowLabel: "월간",
+    resetsAt: reset,
+    resetLabel: "2026년 8월 28일 오후 3:20",
+  });
 
-  const w3 = normalizeCodexWeeklyQuota({
+  const bothPreferred = normalizeCodexQuota({
+    rateLimits: {
+      primary: { usedPercent: 12, windowDurationMins: 300, resetsAt: reset },
+      secondary: { usedPercent: 2, windowDurationMins: 43200, resetsAt: reset },
+    },
     rateLimitsByLimitId: {
       codex: { primary: { usedPercent: 37, windowDurationMins: 10080, resetsAt: reset } },
     },
   });
-  assert.equal(w3.available, true);
-  assert.equal(w3.remainingPercent, 63);
+  assert.equal(bothPreferred.windowKind, "weekly");
+  assert.equal(bothPreferred.usedPercent, 37);
+  assert.equal(bothPreferred.windowLabel, "주간");
 
-  const w4 = normalizeCodexWeeklyQuota({
+  const other = normalizeCodexQuota({
     rateLimits: {
-      primary: { usedPercent: 20, windowDurationMins: 300 },
-      secondary: { usedPercent: 80, windowDurationMins: 43200 },
+      primary: { usedPercent: 20, windowDurationMins: 60 },
+      secondary: { usedPercent: 80, windowDurationMins: 300 },
     },
   });
-  assert.deepEqual(w4, {
-    available: false,
-    usedPercent: null,
-    remainingPercent: null,
+  assert.equal(other.windowKind, "other");
+  assert.equal(other.windowDurationMins, 300);
+  assert.equal(other.windowLabel, "5시간");
+  assert.equal(other.usedPercent, 80);
+
+  const freeFixture = normalizeCodexQuota({
+    account: { planType: "free" },
+    rateLimits: { primary: { usedPercent: 2, windowDurationMins: 43200, resetsAt: 1789889511 } },
+  });
+  assert.deepEqual(freeFixture, {
+    available: true,
+    usedPercent: 2,
+    remainingPercent: 98,
+    windowDurationMins: 43200,
+    windowKind: "monthly",
+    windowLabel: "월간",
+    resetsAt: 1789889511,
+    resetLabel: "2026년 9월 20일 오후 4:31",
+  });
+  assert.deepEqual(normalizeCodexQuota({
+    account: { planType: "pro" },
+    rateLimits: { primary: { usedPercent: 2, windowDurationMins: 43200, resetsAt: 1789889511 } },
+  }), freeFixture);
+
+  const partial = normalizeCodexQuota({
+    rateLimits: { primary: { usedPercent: 12, windowDurationMins: 43200, resetsAt: null } },
+  });
+  assert.deepEqual(partial, {
+    available: true,
+    usedPercent: 12,
+    remainingPercent: 88,
+    windowDurationMins: 43200,
+    windowKind: "monthly",
+    windowLabel: "월간",
     resetsAt: null,
     resetLabel: "",
   });
-  assert.equal(normalizeCodexWeeklyQuota({ rateLimits: { primary: { usedPercent: -5, windowDurationMins: 10080 } } }).usedPercent, 0);
-  assert.equal(normalizeCodexWeeklyQuota({ rateLimits: { primary: { usedPercent: 140, windowDurationMins: 10080 } } }).remainingPercent, 0);
+
+  const resetOnly = normalizeCodexQuota({
+    rateLimits: { primary: { windowDurationMins: 43200, resetsAt: reset } },
+  });
+  assert.equal(resetOnly.available, true);
+  assert.equal(resetOnly.usedPercent, null);
+  assert.equal(resetOnly.windowLabel, "월간");
+  assert.equal(resetOnly.resetLabel, "2026년 8월 28일 오후 3:20");
+
+  assert.equal(normalizeCodexQuota({ rateLimits: { primary: { usedPercent: -5, windowDurationMins: 10080 } } }).usedPercent, 0);
+  assert.equal(normalizeCodexQuota({ rateLimits: { primary: { usedPercent: 140, windowDurationMins: 10080 } } }).remainingPercent, 0);
+  assert.equal(normalizeCodexQuota({ rateLimits: { primary: { usedPercent: 12, windowDurationMins: 300 } } }).windowLabel, "5시간");
+  const onlyOther = normalizeCodexQuota({
+    rateLimits: { primary: { usedPercent: 12, windowDurationMins: 300 } },
+  });
+  assert.equal(onlyOther.windowKind, "other");
+  assert.equal(onlyOther.windowDurationMins, 300);
+  assert.equal(onlyOther.windowLabel, "5시간");
+  assert.deepEqual(normalizeCodexQuota({}), {
+    available: false,
+    usedPercent: null,
+    remainingPercent: null,
+    windowDurationMins: null,
+    windowKind: "unknown",
+    windowLabel: "",
+    resetsAt: null,
+    resetLabel: "",
+  });
+  assert.equal(formatCodexQuotaWindowLabel(60), "1시간");
+  assert.equal(formatCodexQuotaWindowLabel(120), "2시간");
+  assert.equal(formatCodexQuotaWindowLabel(1440), "1일");
+  assert.equal(formatCodexQuotaWindowLabel(2880), "2일");
+  assert.equal(formatCodexQuotaWindowLabel(61), "61분");
+  assert.equal(selectCodexQuotaWindow([]), null);
   assert.match(formatCodexResetLabel(reset), /2026년 8월 28일 오후 3:20/u);
 });
 
-test("account notifications invalidate stale state and refresh account plus weekly quota", async () => {
+test("account notifications invalidate stale state and refresh account plus selected quota", async () => {
   const listeners = new Set();
   let loggedIn = false;
   let accountReads = 0;
@@ -343,7 +426,7 @@ test("account notifications invalidate stale state and refresh account plus week
   const snapshot = manager.snapshot();
   assert.equal(snapshot.account.loggedIn, true);
   assert.equal(snapshot.account.email, "user@example.com");
-  assert.equal(snapshot.codexWeekly.remainingPercent, 63);
+  assert.equal(snapshot.codexQuota.remainingPercent, 63);
   assert.ok(accountReads >= 2);
   assert.ok(rateReads >= 2);
   manager.close();

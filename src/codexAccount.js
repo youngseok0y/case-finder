@@ -11,30 +11,39 @@ function numberOrNull(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-const WEEKLY_WINDOW_MINS = 10_080;
 const KST_TIME_ZONE = "Asia/Seoul";
+const PREFERRED_WINDOW_DURATION_MINS = Object.freeze({
+  weekly: 10_080,
+  monthly: 43_200,
+});
 
-function emptyWeeklyQuota() {
+function emptyCodexQuota() {
   return {
     available: false,
     usedPercent: null,
     remainingPercent: null,
+    windowDurationMins: null,
+    windowKind: "unknown",
+    windowLabel: "",
     resetsAt: null,
     resetLabel: "",
   };
 }
 
-function cloneWeeklyQuota(value) {
-  return { ...emptyWeeklyQuota(), ...(value || {}) };
+function cloneCodexQuota(value) {
+  return { ...emptyCodexQuota(), ...(value || {}) };
 }
 
-function weeklyPublicView(value) {
-  const weekly = cloneWeeklyQuota(value);
+function quotaPublicView(value) {
+  const quota = cloneCodexQuota(value);
   return {
-    available: weekly.available,
-    usedPercent: weekly.usedPercent,
-    remainingPercent: weekly.remainingPercent,
-    resetLabel: weekly.resetLabel,
+    available: quota.available,
+    usedPercent: quota.usedPercent,
+    remainingPercent: quota.remainingPercent,
+    windowDurationMins: quota.windowDurationMins,
+    windowKind: quota.windowKind,
+    windowLabel: quota.windowLabel,
+    resetLabel: quota.resetLabel,
   };
 }
 
@@ -85,17 +94,21 @@ function accountValue(result) {
 function limitValue(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const usedPercent = numberOrNull(raw.usedPercent ?? raw.used_percent);
-  const windowDurationMins = numberOrNull(raw.windowDurationMins ?? raw.window_duration_mins);
-  const resetsAt = raw.resetsAt ?? raw.resets_at;
-  if (usedPercent === null && windowDurationMins === null && resetsAt === undefined) return null;
+  const rawDuration = numberOrNull(raw.windowDurationMins ?? raw.window_duration_mins);
+  const windowDurationMins = rawDuration !== null && rawDuration > 0 ? rawDuration : null;
+  const rawResetsAt = raw.resetsAt ?? raw.resets_at;
+  const resetsAt = typeof rawResetsAt === "string"
+    ? (rawResetsAt.trim() || null)
+    : (typeof rawResetsAt === "number" && Number.isFinite(rawResetsAt) ? rawResetsAt : null);
+  if (usedPercent === null && windowDurationMins === null && resetsAt === null) return null;
   return {
     usedPercent,
     windowDurationMins,
-    resetsAt: typeof resetsAt === "string" || typeof resetsAt === "number" ? resetsAt : null,
+    resetsAt,
   };
 }
 
-function rateLimitWindows(result) {
+export function rateLimitWindows(result) {
   const root = result?.rateLimits || result?.rate_limits || result || {};
   const windows = [];
   const add = (source, value) => {
@@ -119,19 +132,77 @@ function rateLimitWindows(result) {
   return windows;
 }
 
-export function normalizeCodexWeeklyQuota(rateLimitResponse) {
-  const weekly = rateLimitWindows(rateLimitResponse)
-    .filter((window) => window.windowDurationMins === WEEKLY_WINDOW_MINS)
-    .find((window) => window.usedPercent !== null)
-    || rateLimitWindows(rateLimitResponse).find((window) => window.windowDurationMins === WEEKLY_WINDOW_MINS);
-  if (!weekly || weekly.usedPercent === null) return emptyWeeklyQuota();
-  const usedPercent = Math.min(100, Math.max(0, weekly.usedPercent));
+function hasUsedPercent(window) {
+  return Number.isFinite(window?.usedPercent);
+}
+
+function isUsableWindow(window) {
+  return Boolean(window && (
+    Number.isFinite(window.windowDurationMins)
+    || hasUsedPercent(window)
+    || window.resetsAt !== null
+  ));
+}
+
+function firstUsefulWindow(windows) {
+  return windows.find(hasUsedPercent) || windows[0] || null;
+}
+
+export function selectCodexQuotaWindow(windows = []) {
+  const usable = (Array.isArray(windows) ? windows : []).filter(isUsableWindow);
+  if (!usable.length) return null;
+
+  for (const duration of Object.values(PREFERRED_WINDOW_DURATION_MINS)) {
+    const preferred = usable.filter((window) => window.windowDurationMins === duration);
+    if (preferred.length) return firstUsefulWindow(preferred);
+  }
+
+  const durations = [...new Set(
+    usable
+      .map((window) => window.windowDurationMins)
+      .filter((duration) => Number.isFinite(duration)),
+  )].sort((left, right) => right - left);
+  for (const duration of durations) {
+    const longest = usable.filter((window) => window.windowDurationMins === duration);
+    if (longest.length) return firstUsefulWindow(longest);
+  }
+
+  return firstUsefulWindow(usable);
+}
+
+export function quotaWindowKind(windowDurationMins) {
+  if (windowDurationMins === PREFERRED_WINDOW_DURATION_MINS.weekly) return "weekly";
+  if (windowDurationMins === PREFERRED_WINDOW_DURATION_MINS.monthly) return "monthly";
+  if (Number.isFinite(windowDurationMins) && windowDurationMins > 0) return "other";
+  return "unknown";
+}
+
+export function formatCodexQuotaWindowLabel(windowDurationMins) {
+  const kind = quotaWindowKind(windowDurationMins);
+  if (kind === "weekly") return "주간";
+  if (kind === "monthly") return "월간";
+  if (kind === "unknown") return "";
+  if (Number.isInteger(windowDurationMins / 1_440)) return `${windowDurationMins / 1_440}일`;
+  if (Number.isInteger(windowDurationMins / 60)) return `${windowDurationMins / 60}시간`;
+  return `${windowDurationMins}분`;
+}
+
+export function normalizeCodexQuota(rateLimitResponse) {
+  const selected = selectCodexQuotaWindow(rateLimitWindows(rateLimitResponse));
+  if (!selected) return emptyCodexQuota();
+  const usedPercent = hasUsedPercent(selected)
+    ? Math.min(100, Math.max(0, selected.usedPercent))
+    : null;
+  const windowKind = quotaWindowKind(selected.windowDurationMins);
   return {
     available: true,
     usedPercent,
-    remainingPercent: Math.min(100, Math.max(0, 100 - usedPercent)),
-    resetsAt: weekly.resetsAt,
-    resetLabel: formatCodexResetLabel(weekly.resetsAt),
+    remainingPercent: usedPercent === null ? null : Math.min(100, Math.max(0, 100 - usedPercent)),
+    windowDurationMins: selected.windowDurationMins,
+    windowKind,
+    windowLabel: formatCodexQuotaWindowLabel(selected.windowDurationMins),
+    resetsAt: selected.resetsAt,
+    resetLabel: formatCodexResetLabel(selected.resetsAt),
   };
 }
 
@@ -170,7 +241,7 @@ export class CodexAccountManager {
     this.runtime = runtime;
     this.account = accountValue({ requiresOpenaiAuth: true });
     this.rateLimits = { source: "app_server", limits: {} };
-    this.codexWeekly = emptyWeeklyQuota();
+    this.codexQuota = emptyCodexQuota();
     this.pendingLoginId = "";
     this.refreshPromise = null;
     this.unsubscribe = runtime.onNotification((message) => this.#handleNotification(message));
@@ -184,13 +255,13 @@ export class CodexAccountManager {
   async #readRateLimits() {
     const result = await this.runtime.request("account/rateLimits/read", {}, { allowRestart: true });
     this.rateLimits = rateLimitValue(result || {});
-    this.codexWeekly = normalizeCodexWeeklyQuota(result || {});
+    this.codexQuota = normalizeCodexQuota(result || {});
   }
 
   #clearAccountCache() {
     this.account = accountValue({ requiresOpenaiAuth: true });
     this.rateLimits = { source: "app_server", limits: {} };
-    this.codexWeekly = emptyWeeklyQuota();
+    this.codexQuota = emptyCodexQuota();
   }
 
   async refresh() {
@@ -201,7 +272,7 @@ export class CodexAccountManager {
         await this.#readRateLimits();
       } catch {
         this.rateLimits = { source: "app_server", limits: {} };
-        this.codexWeekly = emptyWeeklyQuota();
+        this.codexQuota = emptyCodexQuota();
       }
       return this.snapshot();
     })().finally(() => {
@@ -214,7 +285,7 @@ export class CodexAccountManager {
     const snapshot = await this.refresh();
     return {
       ...snapshot.account,
-      codexWeekly: weeklyPublicView(snapshot.codexWeekly),
+      codexQuota: quotaPublicView(snapshot.codexQuota),
       pendingLogin: snapshot.pendingLogin,
     };
   }
@@ -251,17 +322,17 @@ export class CodexAccountManager {
       await this.#readRateLimits();
     } catch (error) {
       this.rateLimits = { source: "app_server", limits: {} };
-      this.codexWeekly = emptyWeeklyQuota();
+      this.codexQuota = emptyCodexQuota();
       throw error;
     }
-    return { source: "app_server", codexWeekly: weeklyPublicView(this.codexWeekly) };
+    return { source: "app_server", codexQuota: quotaPublicView(this.codexQuota) };
   }
 
   snapshot() {
     return {
       account: { ...this.account },
       rateLimits: { ...this.rateLimits, limits: { ...this.rateLimits.limits } },
-      codexWeekly: cloneWeeklyQuota(this.codexWeekly),
+      codexQuota: cloneCodexQuota(this.codexQuota),
       pendingLogin: Boolean(this.pendingLoginId),
     };
   }
@@ -273,7 +344,7 @@ export class CodexAccountManager {
   #handleNotification(message) {
     if (message?.method === "account/rateLimits/updated") {
       this.rateLimits = rateLimitValue(message.params || {});
-      this.codexWeekly = normalizeCodexWeeklyQuota(message.params || {});
+      this.codexQuota = normalizeCodexQuota(message.params || {});
       return;
     }
     if (!["account/updated", "account/login/completed"].includes(message?.method)) return;

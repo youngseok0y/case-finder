@@ -239,13 +239,17 @@ function renderServiceStatus(payload) {
   if (!payload) return;
   const engine = payload.adapter?.label || "확인 불가";
   const law = payload.mcp?.connected ? "연결됨" : "연결 확인 필요";
-  const weekly = payload.quota?.codexWeekly || {};
-  const quota = weekly.loggedIn === false
+  const quota = payload.quota?.codexQuota || {};
+  const windowSuffix = quota.windowLabel ? ` / ${quota.windowLabel}` : "";
+  const remaining = quota.remainingPercent === null || quota.remainingPercent === undefined || quota.remainingPercent === ""
+    ? null
+    : Number(quota.remainingPercent);
+  const quotaLabel = quota.loggedIn === false
     ? "로그인 필요"
-    : weekly.available === true && Number.isFinite(Number(weekly.remainingPercent))
-      ? `${Math.max(0, Math.min(100, Number(weekly.remainingPercent)))}% 남음`
+    : quota.available === true && Number.isFinite(remaining)
+      ? `${Math.max(0, Math.min(100, remaining))}% 남음${windowSuffix}`
       : "확인할 수 없음";
-  serviceStatus.innerHTML = `<div><span>검색 엔진</span><strong>${escapeHtml(engine)}</strong></div><div><span>법령 API</span><strong>${escapeHtml(law)}</strong></div><div><span>Codex 주간 사용량</span><strong>${escapeHtml(quota)}</strong></div>`;
+  serviceStatus.innerHTML = `<div><span>검색 엔진</span><strong>${escapeHtml(engine)}</strong></div><div><span>법령 API</span><strong>${escapeHtml(law)}</strong></div><div><span>Codex 사용량</span><strong>${escapeHtml(quotaLabel)}</strong></div>`;
 }
 
 async function loadServiceStatus() {
@@ -253,7 +257,7 @@ async function loadServiceStatus() {
     const response = await fetch("/health", { cache: "no-store" });
     renderServiceStatus(await response.json());
   } catch {
-    serviceStatus.innerHTML = "<div><span>검색 엔진</span><strong>상태 확인 불가</strong></div><div><span>법령 API</span><strong>상태 확인 불가</strong></div><div><span>Codex 주간 사용량</span><strong>확인할 수 없음</strong></div>";
+    serviceStatus.innerHTML = "<div><span>검색 엔진</span><strong>상태 확인 불가</strong></div><div><span>법령 API</span><strong>상태 확인 불가</strong></div><div><span>Codex 사용량</span><strong>확인할 수 없음</strong></div>";
   }
 }
 

@@ -4,7 +4,7 @@ const fields = ["SEARCH_ADAPTER"];
 const codexStatus = document.querySelector("#codex-status");
 const codexEmail = document.querySelector("#codex-email");
 const codexPlan = document.querySelector("#codex-plan");
-const codexWeekly = document.querySelector("#codex-weekly");
+const codexQuota = document.querySelector("#codex-quota");
 const codexReset = document.querySelector("#codex-reset");
 const codexLoginMessage = document.querySelector("#codex-login-message");
 
@@ -36,36 +36,52 @@ function setCodexMessage(text, isError = false) {
   codexLoginMessage.style.color = isError ? "var(--danger)" : "var(--muted)";
 }
 
+function percentValue(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : null;
+}
+
+function quotaUsageLabel(quota) {
+  if (quota?.available !== true) return "확인할 수 없음";
+  const used = percentValue(quota.usedPercent);
+  const remaining = percentValue(quota.remainingPercent);
+  const usage = used !== null && remaining !== null
+    ? `${used}% 사용 · ${remaining}% 남음`
+    : used !== null
+      ? `${used}% 사용`
+      : remaining !== null
+        ? `${remaining}% 남음`
+        : "확인할 수 없음";
+  if (usage === "확인할 수 없음") return usage;
+  return quota.windowLabel ? `${usage} / ${quota.windowLabel}` : usage;
+}
+
 async function loadCodexStatus() {
   try {
     const accountResponse = await fetch("/api/codex/account", { cache: "no-store" });
     const account = await accountResponse.json();
     if (!accountResponse.ok) throw new Error(account.message || `HTTP ${accountResponse.status}`);
     const loggedIn = account.loggedIn === true;
-    const weekly = account.codexWeekly || {};
+    const quota = account.codexQuota || {};
     codexStatus.textContent = loggedIn
       ? "계정이 연결되어 있어요."
       : "아직 연결된 계정이 없어요. 아래에서 계정을 연결해 주세요.";
     codexEmail.textContent = loggedIn ? (account.email || "이메일 미제공") : "연결 필요";
     codexPlan.textContent = loggedIn ? (account.planType || "확인되지 않음") : "연결 필요";
     if (!loggedIn) {
-      codexWeekly.textContent = "연결 필요";
+      codexQuota.textContent = "연결 필요";
       codexReset.textContent = "연결 필요";
-    } else if (weekly.available === true && Number.isFinite(Number(weekly.usedPercent)) && Number.isFinite(Number(weekly.remainingPercent))) {
-      const used = Math.max(0, Math.min(100, Number(weekly.usedPercent)));
-      const remaining = Math.max(0, Math.min(100, Number(weekly.remainingPercent)));
-      codexWeekly.textContent = `${used}% 사용 · ${remaining}% 남음`;
-      codexReset.textContent = weekly.resetLabel || "확인할 수 없음";
     } else {
-      codexWeekly.textContent = "확인할 수 없음";
-      codexReset.textContent = "확인할 수 없음";
+      codexQuota.textContent = quotaUsageLabel(quota);
+      codexReset.textContent = quota.resetLabel || "확인할 수 없음";
     }
     return account;
   } catch (error) {
     codexStatus.textContent = `Codex 상태를 읽지 못했습니다: ${error.message}`;
     codexEmail.textContent = "확인할 수 없음";
     codexPlan.textContent = "확인할 수 없음";
-    codexWeekly.textContent = "확인할 수 없음";
+    codexQuota.textContent = "확인할 수 없음";
     codexReset.textContent = "확인할 수 없음";
     return null;
   }

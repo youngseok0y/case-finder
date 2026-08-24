@@ -98,12 +98,27 @@ function adapterLabel(adapter) {
   return adapter === "gemini_d" ? "Gemini 빠른 검색" : "Luna 고정밀 검색";
 }
 
-function codexWeeklyApiView(weekly) {
+function finiteNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function codexQuotaApiView(quota) {
+  const windowKind = ["weekly", "monthly", "other", "unknown"].includes(quota?.windowKind)
+    ? quota.windowKind
+    : "unknown";
+  const usedPercent = finiteNumber(quota?.usedPercent);
+  const remainingPercent = finiteNumber(quota?.remainingPercent);
+  const windowDurationMins = finiteNumber(quota?.windowDurationMins);
   return {
-    available: weekly?.available === true,
-    usedPercent: Number.isFinite(Number(weekly?.usedPercent)) ? Math.min(100, Math.max(0, Number(weekly.usedPercent))) : null,
-    remainingPercent: Number.isFinite(Number(weekly?.remainingPercent)) ? Math.min(100, Math.max(0, Number(weekly.remainingPercent))) : null,
-    resetLabel: typeof weekly?.resetLabel === "string" ? weekly.resetLabel : "",
+    available: quota?.available === true,
+    usedPercent: usedPercent === null ? null : Math.min(100, Math.max(0, usedPercent)),
+    remainingPercent: remainingPercent === null ? null : Math.min(100, Math.max(0, remainingPercent)),
+    windowDurationMins: windowDurationMins === null || windowDurationMins <= 0 ? null : windowDurationMins,
+    windowKind,
+    windowLabel: typeof quota?.windowLabel === "string" ? quota.windowLabel : "",
+    resetLabel: typeof quota?.resetLabel === "string" ? quota.resetLabel : "",
   };
 }
 
@@ -115,18 +130,20 @@ function codexAccountApiView(account) {
     planType: typeof account?.planType === "string" ? account.planType : "unknown",
     type: typeof account?.type === "string" ? account.type : "",
     authMode: typeof account?.authMode === "string" ? account.authMode : "unknown",
-    codexWeekly: codexWeeklyApiView(account?.codexWeekly),
+    codexQuota: codexQuotaApiView(account?.codexQuota),
     pendingLogin: account?.pendingLogin === true,
   };
 }
 
-function codexWeeklyHealthView(account) {
-  const weekly = codexWeeklyApiView(account?.codexWeekly);
+function codexQuotaHealthView(account) {
+  const quota = codexQuotaApiView(account?.codexQuota);
   const loggedIn = account?.loggedIn === true;
   return {
     loggedIn,
-    available: loggedIn && weekly.available === true,
-    remainingPercent: loggedIn ? weekly.remainingPercent : null,
+    available: loggedIn && quota.available === true,
+    remainingPercent: loggedIn ? quota.remainingPercent : null,
+    windowKind: loggedIn ? quota.windowKind : "unknown",
+    windowLabel: loggedIn ? quota.windowLabel : "",
   };
 }
 
@@ -147,15 +164,15 @@ async function quotaStatus({
   } catch {
     gemini = { label: "Gemini 사용량 확인 불가", source: "unavailable" };
   }
-  let codexWeekly = { loggedIn: false, available: false, remainingPercent: null };
+  let codexQuota = { loggedIn: false, available: false, remainingPercent: null, windowKind: "unknown", windowLabel: "" };
   try {
-    codexWeekly = codexWeeklyHealthView(await codexAccountManagerImpl().read());
+    codexQuota = codexQuotaHealthView(await codexAccountManagerImpl().read());
   } catch {
     // Health remains available when app-server account/quota is unavailable.
   }
   return {
     gemini,
-    codexWeekly,
+    codexQuota,
   };
 }
 
@@ -498,7 +515,7 @@ export function createRequestHandler({
     if (request.method === "GET" && url.pathname === "/api/codex/rate-limits") {
       try {
         const limits = await codexAccountManagerImpl().readRateLimits();
-        sendJson(response, 200, { ok: true, source: "app_server", codexWeekly: codexWeeklyApiView(limits?.codexWeekly) });
+        sendJson(response, 200, { ok: true, source: "app_server", codexQuota: codexQuotaApiView(limits?.codexQuota) });
       } catch (error) {
         sendCodexApiError(response, error);
       }
