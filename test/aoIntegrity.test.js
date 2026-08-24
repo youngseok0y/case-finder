@@ -68,6 +68,45 @@ test("one accepted search with no results can produce NO_RESULT", async () => {
   assert.equal(contract.terminalState, "NO_RESULT");
 });
 
+test("definitive NOT_FOUND search is completed and produces NO_RESULT", async () => {
+  const { ao, ledger } = createFixtureAo([
+    searchEvent({ result: { isError: true, rawText: "[NOT_FOUND]" } }),
+    { event: { type: "final", selection: { selected: [], intro: "" } } },
+  ]);
+  const result = await ao.run("not found fixture");
+  const contract = toResultContract(result, RESULT_METADATA);
+
+  assert.equal(ledger.snapshot().searchTraces.length, 1);
+  assert.equal(result.output_valid, true);
+  assert.equal(contract.terminalState, "NO_RESULT");
+});
+
+test("hallucination search does not count as a completed search", async () => {
+  const { ao } = createFixtureAo([
+    searchEvent({ result: { isError: true, rawText: "[HALLUCINATION_DETECTED]" } }),
+    { event: { type: "final", selection: { selected: [], intro: "" } } },
+  ]);
+  const result = await ao.run("hallucination fixture");
+  const contract = toResultContract(result, RESULT_METADATA);
+
+  assert.equal(result.output_valid, false);
+  assert.equal(result.protocolDiagnostics[0].code, "AO_V2_SEARCH_REQUIRED");
+  assert.notEqual(contract.terminalState, "NO_RESULT");
+});
+
+test("generic search error does not count as a completed search", async () => {
+  const { ao } = createFixtureAo([
+    searchEvent({ result: { isError: true, rawText: "provider error" } }),
+    { event: { type: "final", selection: { selected: [], intro: "" } } },
+  ]);
+  const result = await ao.run("provider error fixture");
+  const contract = toResultContract(result, RESULT_METADATA);
+
+  assert.equal(result.output_valid, false);
+  assert.equal(result.protocolDiagnostics[0].code, "AO_V2_SEARCH_REQUIRED");
+  assert.notEqual(contract.terminalState, "NO_RESULT");
+});
+
 test("accepted search plus detail verification preserves successful final selection", async () => {
   const searchArgs = { domain: "precedent", query: "verified fixture" };
   const { ao, ledger } = createFixtureAo([

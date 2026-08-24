@@ -160,11 +160,9 @@ export class CodexAppServerSession {
     if (String(turn.id || turnIdFromMessage(message) || "") !== String(this.turnId)) return;
     const turnResolution = normalizeModelResolution(turn, this.requestedModel);
     if (turnResolution.hasSignal) {
-      this.modelResolution = {
-        requestedModel: turnResolution.requestedModel || this.modelResolution.requestedModel,
-        effectiveModel: turnResolution.effectiveModel || this.modelResolution.effectiveModel,
-        fallbackApplied: this.modelResolution.fallbackApplied || turnResolution.fallbackApplied,
-      };
+      const requestedModel = turnResolution.requestedModel || this.modelResolution.requestedModel;
+      const effectiveModel = turnResolution.effectiveModel || this.modelResolution.effectiveModel;
+      this.modelResolution = normalizeModelResolution({ requestedModel, effectiveModel }, requestedModel);
     }
     if (String(turn.status || "completed") !== "completed") {
       this.#fail(runtimeError("CODEX_APP_SERVER_TURN_FAILED", `turn status: ${turn.status || "unknown"}`));

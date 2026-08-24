@@ -1,5 +1,7 @@
 import { createAgenticSearchV2 } from "../aoV2/index.js";
+import { getDefaultCodexAccountManager } from "../codexAccount.js";
 import { createCodexAppServerSessionFactory } from "../codexAppServerRuntime.js";
+import { selectCodexModel } from "../codexModelSelection.js";
 import { enrichLawReferences, lawDetailLink, parseStatuteReferences } from "../directLookup.js";
 import { config } from "../../config.js";
 import { toResultContract } from "./resultContract.js";
@@ -152,15 +154,27 @@ export function buildLunaResultItems(result = {}, ledger = null) {
 
 export function createLunaNativeAdapter({
   run,
-  createSearch = (options) => createAgenticSearchV2({
+  accountManager = null,
+  createSearch = null,
+} = {}) {
+  const usesDefaultSearch = typeof createSearch !== "function" && !run;
+  const searchFactory = createSearch || ((options) => createAgenticSearchV2({
     ...options,
     provider: "codex_luna",
     adapterOptions: { createSession: createCodexAppServerSessionFactory(), ...(options.adapterOptions || {}) },
-  }),
-} = {}) {
-  const persistentSearch = run ? null : createSearch({ provider: "codex_luna" });
+  }));
+  const persistentSearch = run ? null : searchFactory({ provider: "codex_luna" });
   if (!run && (!persistentSearch || typeof persistentSearch.runWithContext !== "function")) {
     throw new Error("LUNA_NATIVE_SEARCH_FACTORY_INVALID");
+  }
+  async function selectedModel(options) {
+    const manager = accountManager || (usesDefaultSearch ? getDefaultCodexAccountManager() : null);
+    if (!manager || typeof manager.read !== "function") return selectCodexModel("unknown");
+    try {
+      return selectCodexModel((await manager.read())?.planType);
+    } catch {
+      return selectCodexModel("unknown");
+    }
   }
   return {
     id: "luna_native",
@@ -168,9 +182,11 @@ export function createLunaNativeAdapter({
     architecture: "AO_V2_NATIVE",
     executionPin: LUNA_NATIVE_EXECUTION_PIN,
     async runNaturalQuery(query, options = {}) {
+      const model = await selectedModel(options);
+      const runOptions = { ...options, model };
       const context = run
-        ? { result: await run(query, { ...options, provider: "codex_luna" }), ledger: null }
-        : await persistentSearch.runWithContext(query, options);
+        ? { result: await run(query, { ...runOptions, provider: "codex_luna" }), ledger: null }
+        : await persistentSearch.runWithContext(query, runOptions);
       const result = context.result || {};
       const ledger = context.ledger || null;
       const items = buildLunaResultItems(result, ledger);

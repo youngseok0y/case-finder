@@ -28,14 +28,23 @@ function errorResult(code, message, details = {}) {
   };
 }
 
-function hasNotFound(raw) {
-  const value = toolText(raw);
-  return value.includes("[NOT_FOUND]") || value.includes("[HALLUCINATION_DETECTED]");
+function isSearchTool(name) {
+  return name === "search_decisions" || name === "search_law";
+}
+
+function normalizeToolState(name, raw, rawText) {
+  const notFound = rawText.includes("[NOT_FOUND]");
+  const hallucinationDetected = rawText.includes("[HALLUCINATION_DETECTED]");
+  const isError = Boolean(raw?.isError) || notFound || hallucinationDetected;
+  const searchCompleted = isSearchTool(name)
+    && !hallucinationDetected
+    && (!raw?.isError || notFound);
+  return { isError, notFound, hallucinationDetected, searchCompleted };
 }
 
 export function normalizeLegalToolResult(name, raw) {
   const rawText = toolText(raw);
-  const isError = Boolean(raw?.isError) || hasNotFound(raw);
+  const state = normalizeToolState(name, raw, rawText);
   if (name === "search_decisions") {
     const items = parseDecisionSearchResults(rawText).map((item) => ({
       id: item.id,
@@ -46,7 +55,7 @@ export function normalizeLegalToolResult(name, raw) {
       caseType: item.caseType || "",
       type: item.type || "",
     }));
-    return { isError, total: items.length, items, rawText };
+    return { ...state, total: items.length, items, rawText };
   }
   if (name === "search_law") {
     const items = parseLawSearchResults(rawText).map((item) => ({
@@ -55,12 +64,12 @@ export function normalizeLegalToolResult(name, raw) {
       mst: item.mst,
       link: item.link,
     }));
-    return { isError, total: items.length, items, rawText };
+    return { ...state, total: items.length, items, rawText };
   }
   if (name === "get_decision_text") {
     const detail = parseDecisionDetail(rawText);
     return {
-      isError,
+      ...state,
       caseNumber: detail.caseNumber,
       court: detail.court,
       date: detail.date,
@@ -70,7 +79,7 @@ export function normalizeLegalToolResult(name, raw) {
       rawText,
     };
   }
-  if (name === "get_law_text") return { isError, rawText };
+  if (name === "get_law_text") return { ...state, rawText };
   return errorResult("UNKNOWN_TOOL", `Unsupported legal tool: ${name}`);
 }
 
@@ -153,9 +162,9 @@ export class LegalToolGateway {
     const raw = await this.callTool(name, args, { signal: this.signal });
     const normalized = await this.normalizeResult(name, raw, args);
 
-    if (name === "search_decisions" && !normalized.isError) {
+    if (name === "search_decisions" && normalized.searchCompleted === true) {
       this.ledger.recordDecisionSearch({ query: args.query, domain: args.domain, items: normalized.items });
-    } else if (name === "search_law" && !normalized.isError) {
+    } else if (name === "search_law" && normalized.searchCompleted === true) {
       this.ledger.recordLawSearch({ query: args.query, items: normalized.items });
     } else if (name === "get_decision_text") {
       this.ledger.recordDecisionDetail({

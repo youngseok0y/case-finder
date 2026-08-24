@@ -20,23 +20,6 @@ function modelField(payload, keys) {
   return "";
 }
 
-function modelFlag(payload) {
-  const sources = [
-    payload?.modelResolution,
-    payload?.model_resolution,
-    payload?.thread,
-    payload?.turn,
-    payload,
-  ];
-  for (const source of sources) {
-    if (!source || typeof source !== "object") continue;
-    for (const key of ["fallbackApplied", "fallback_applied"]) {
-      if (source[key] !== undefined) return source[key] === true;
-    }
-  }
-  return false;
-}
-
 export function normalizeModelResolution(payload, requestedModel = "") {
   const requested = modelField(payload, ["requestedModel", "requested_model", "modelRequested", "model_requested"]) || modelText(requestedModel);
   const effective = modelField(payload, ["effectiveModel", "effective_model", "resolvedModel", "resolved_model", "modelName", "model_name", "model"]) || requested;
@@ -47,12 +30,10 @@ export function normalizeModelResolution(payload, requestedModel = "") {
   );
   const normalizedRequested = requested.toLowerCase();
   const normalizedEffective = effective.toLowerCase();
-  const modelFallback = normalizedRequested.endsWith("-luna")
-    && normalizedEffective.endsWith("-terra");
   return {
     requestedModel: requested,
     effectiveModel: effective,
-    fallbackApplied: modelFlag(payload) || modelFallback,
+    fallbackApplied: Boolean(normalizedRequested && normalizedEffective && normalizedRequested !== normalizedEffective),
     hasSignal: explicitSignal,
   };
 }

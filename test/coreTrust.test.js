@@ -59,3 +59,19 @@ test("restricted legal MCP surface contains exactly the four allowed tools", () 
     "get_law_text",
   ]);
 });
+
+test("definitive NOT_FOUND search remains an error but records a completed search trace", async () => {
+  const ledger = createEvidenceLedger({ provider: "not-found-trace" });
+  const gateway = createLegalToolGateway({
+    ledger,
+    callTool: async () => ({ isError: true, content: [{ type: "text", text: "[NOT_FOUND]" }] }),
+  });
+
+  const result = await gateway.execute("search_decisions", { domain: "precedent", query: "not found fixture" });
+
+  assert.equal(result.isError, true);
+  assert.equal(result.notFound, true);
+  assert.equal(result.hallucinationDetected, false);
+  assert.equal(result.searchCompleted, true);
+  assert.equal(ledger.snapshot().searchTraces.length, 1);
+});

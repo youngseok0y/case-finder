@@ -4,7 +4,7 @@ import { createSafetyController } from "../safety.js";
 import { createTelemetry } from "../telemetry.js";
 import { createCommonEvidenceEnvelope } from "../commonEvidenceEnvelope.js";
 import { LEGAL_TOOL_NAMES } from "../legalToolDefinitions.js";
-import { isLunaTerraFallback } from "../../codexAppServerRuntime.js";
+import { isLunaTerraFallback, normalizeModelResolution } from "../../codexAppServerRuntime.js";
 
 export const CODEX_NATIVE_ALLOWED_TOOLS = LEGAL_TOOL_NAMES;
 
@@ -61,6 +61,27 @@ function isLegalSearchTool(name) {
   return name === "search_decisions" || name === "search_law";
 }
 
+function normalizeDelegatedToolResult(name, toolResult) {
+  if (toolResult && (
+    typeof toolResult.searchCompleted === "boolean"
+    || typeof toolResult.notFound === "boolean"
+    || typeof toolResult.hallucinationDetected === "boolean"
+  )) return toolResult;
+  if (toolResult?.items || toolResult?.caseNumber || toolResult?.rawText) {
+    if (!isLegalSearchTool(name)) return toolResult;
+    const rawText = typeof toolResult.rawText === "string" ? toolResult.rawText : "";
+    const notFound = rawText.includes("[NOT_FOUND]");
+    const hallucinationDetected = rawText.includes("[HALLUCINATION_DETECTED]");
+    return {
+      ...toolResult,
+      notFound,
+      hallucinationDetected,
+      searchCompleted: !hallucinationDetected && (!toolResult.isError || notFound),
+    };
+  }
+  return normalizeLegalToolResult(name, toolResult || {});
+}
+
 export function createCodexNativeAo({
   gateway,
   ledger = gateway.ledger,
@@ -76,17 +97,16 @@ export function createCodexNativeAo({
 
   return {
     provider: "codex_luna",
-    async run(query, { onProgress = () => {}, abortSignal = null } = {}) {
+    async run(query, { onProgress = () => {}, abortSignal = null, model = config.codexModel } = {}) {
       telemetry.setQuestionScopeId(ledger.scopeId);
       const startedAt = Date.now();
       safety.assertCanContinue();
       const acceptedSearchTools = new Set();
       const recordDelegatedToolResult = ({ name, arguments: args = {}, result: toolResult } = {}) => {
-        const normalized = toolResult?.items || toolResult?.caseNumber || toolResult?.rawText
-          ? toolResult
-          : normalizeLegalToolResult(name, toolResult || {});
-        if (!normalized || normalized.isError) return;
-        if (isLegalSearchTool(name)) acceptedSearchTools.add(name);
+        const normalized = normalizeDelegatedToolResult(name, toolResult);
+        const searchCompleted = isLegalSearchTool(name) && normalized?.searchCompleted === true;
+        if (!normalized || (normalized.isError && !searchCompleted)) return;
+        if (searchCompleted) acceptedSearchTools.add(name);
         const progressSnapshot = ledgerProgressEvent(ledger);
         const progress = {
           candidateCount: progressSnapshot.candidateCount,
@@ -121,7 +141,7 @@ export function createCodexNativeAo({
       const session = await createSession({
         query,
         prompt: buildLunaNativePrompt(query),
-        model: config.codexModel,
+        model,
         reasoningEffort: config.codexReasoningEffort,
         tools: CODEX_NATIVE_ALLOWED_TOOLS.map((name) => ({ name, kind: "legal", restricted: true })),
         onDelegatedToolResult: recordDelegatedToolResult,
@@ -193,7 +213,7 @@ export function createCodexNativeAo({
               continue;
             }
             const result = await gateway.execute(name, event.arguments || event.args || {});
-            if (!result?.isError && isLegalSearchTool(name)) acceptedSearchTools.add(name);
+            if (isLegalSearchTool(name) && result?.searchCompleted === true) acceptedSearchTools.add(name);
             if (typeof session.respondToToolCall !== "function") throw new Error("CODEX_NATIVE_SESSION_TOOL_RESPONSE_REQUIRED");
             await session.respondToToolCall({ callId: event.call_id || event.callId || null, name, result });
             safety.noteEvidenceCount(ledgerProgress(ledger).evidenceCount);
@@ -208,7 +228,17 @@ export function createCodexNativeAo({
             });
             telemetry.setSessionId(event.session_id || event.sessionId || session?.sessionId || null);
             if (event.usage || event.elapsedMs) telemetry.recordModelTurn({ usage: event.usage || {}, elapsedMs: event.elapsedMs || 0 });
-            const modelResolution = event.modelResolution || null;
+            const rawModelResolution = event.modelResolution || null;
+            const normalizedModelResolution = rawModelResolution
+              ? normalizeModelResolution(rawModelResolution, model)
+              : null;
+            const modelResolution = normalizedModelResolution
+              ? {
+                requestedModel: normalizedModelResolution.requestedModel,
+                effectiveModel: normalizedModelResolution.effectiveModel,
+                fallbackApplied: normalizedModelResolution.fallbackApplied,
+              }
+              : null;
             if (isLunaTerraFallback(modelResolution)) {
               onProgress("MODEL_FALLBACK", {
                 candidateCount: finalProgress.candidateCount,
