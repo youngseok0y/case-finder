@@ -17,6 +17,13 @@ export const LUNA_NATIVE_EXECUTION_PIN = Object.freeze({
   persistence: "runtime_scoped",
 });
 
+function executionPinForModel(model) {
+  return {
+    ...LUNA_NATIVE_EXECUTION_PIN,
+    model: model || LUNA_NATIVE_EXECUTION_PIN.model,
+  };
+}
+
 function buildLunaLawReferences(result) {
   const references = Array.isArray(result.lawReferences) ? result.lawReferences : [];
   const seen = new Set();
@@ -205,7 +212,7 @@ export function createLunaNativeAdapter({
         adapterId: "luna_native",
         provider: "codex_luna",
         architecture: "AO_V2_NATIVE",
-        executionPin: LUNA_NATIVE_EXECUTION_PIN,
+        executionPin: executionPinForModel(model),
       });
     },
   };

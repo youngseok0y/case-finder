@@ -13,9 +13,10 @@ test("Codex plan model policy selects Terra only for Free and Go", () => {
   for (const planType of lunaPlans) assert.equal(selectCodexModel(planType), "gpt-5.6-luna");
 });
 
-test("selected plan model reaches the AO session without changing the session policy", async () => {
-  async function captureModel(planType) {
+test("selected plan model reaches telemetry and execution metadata", async () => {
+  async function captureModel(planType, effectiveModel = null) {
     const captured = {};
+    const progressEvents = [];
     const search = createAgenticSearchV2({
       provider: "codex_luna",
       gatewayOptions: { callTool: async () => ({ items: [] }) },
@@ -30,7 +31,15 @@ test("selected plan model reaches the AO session without changing the session po
                 const args = { domain: "precedent", query: "model selection fixture" };
                 return { type: "mcp_tool_call", delegated: false, name: "search_decisions", arguments: args, call_id: "search-1" };
               }
-              return { type: "final", selection: { selected: [], intro: "" } };
+              return {
+                type: "final",
+                selection: { selected: [], intro: "" },
+                modelResolution: {
+                  requestedModel: model,
+                  effectiveModel: effectiveModel || model,
+                  fallbackApplied: false,
+                },
+              };
             },
             async respondToToolCall() {},
             async close() {},
@@ -42,12 +51,37 @@ test("selected plan model reaches the AO session without changing the session po
       accountManager: { read: async () => ({ planType }) },
       createSearch: () => search,
     });
-    await adapter.runNaturalQuery("model selection fixture");
-    return captured.model;
+    const result = await adapter.runNaturalQuery("model selection fixture", {
+      onProgress: (event) => progressEvents.push(event),
+    });
+    return { model: captured.model, result, progressEvents };
   }
 
-  assert.equal(await captureModel("free"), "gpt-5.6-terra");
-  assert.equal(await captureModel("plus"), "gpt-5.6-luna");
+  for (const planType of ["free", "go"]) {
+    const execution = await captureModel(planType);
+    assert.equal(execution.model, "gpt-5.6-terra");
+    assert.equal(execution.result.executionPin.model, "gpt-5.6-terra");
+    assert.equal(execution.result.telemetry.model, "gpt-5.6-terra");
+    assert.deepEqual(execution.result.modelResolution, {
+      requestedModel: "gpt-5.6-terra",
+      effectiveModel: "gpt-5.6-terra",
+      fallbackApplied: false,
+    });
+  }
+  const plusExecution = await captureModel("plus");
+  assert.equal(plusExecution.model, "gpt-5.6-luna");
+  assert.equal(plusExecution.result.executionPin.model, "gpt-5.6-luna");
+  assert.equal(plusExecution.result.telemetry.model, "gpt-5.6-luna");
+
+  const fallbackExecution = await captureModel("plus", "gpt-5.6-terra");
+  assert.deepEqual(fallbackExecution.result.modelResolution, {
+    requestedModel: "gpt-5.6-luna",
+    effectiveModel: "gpt-5.6-terra",
+    fallbackApplied: true,
+  });
+  assert.equal(fallbackExecution.result.telemetry.model, "gpt-5.6-luna");
+  assert.equal(fallbackExecution.result.executionPin.model, "gpt-5.6-luna");
+  assert.equal(fallbackExecution.progressEvents.includes("MODEL_FALLBACK"), true);
 });
 
 test("fallbackApplied is true only when requested and effective models differ", () => {

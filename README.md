@@ -7,7 +7,7 @@ Case Finder is a local Fable-format legal precedent search application. It retri
 - Product adapters: `gemini_d` and `luna_native`
 - Search display is fixed at `20`; `candidateMax=20`
 - Gemini: pinned deterministic plan/selection flow with `gemini-3.5-flash-lite`
-- Luna: Native AO-v2 with `gpt-5.6-luna` and `medium` reasoning
+- Luna: Native AO-v2; Free/Go request `gpt-5.6-terra`, other/unknown plans request `gpt-5.6-luna`, with `medium` reasoning
 - Legal MCP tools: `search_decisions`, `search_law`, `get_decision_text`, `get_law_text`
 - Final cases require provider-observed identity and successful detail verification
 - Luna keeps `EvidenceLedger`, `FinalSelectionGate`, and verified-only output

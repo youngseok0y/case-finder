@@ -6,6 +6,7 @@ Read `README.md` before changing the project. The repository is the production c
 
 - Product adapters are `gemini_d` and `luna_native` only.
 - Search display is fixed at `20` and `candidateMax=20`.
+- Luna Native AO-v2 selects `gpt-5.6-terra` for Free/Go and `gpt-5.6-luna` for other/unknown plans, with `medium` reasoning.
 - Do not change the Gemini plan/selection prompts, ranking, request budget, or model pin without explicit approval.
 - Do not change Luna Native AO-v2 prompts, policy, reasoning, model pin, or restricted legal MCP surface without explicit approval.
 - Preserve provider-only source fields, verified-only final cases, compound identity behavior, `EvidenceLedger`, and `FinalSelectionGate`.

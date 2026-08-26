@@ -42,7 +42,7 @@ export function createAgenticSearchV2({
     const ledger = createEvidenceLedger({ provider });
     const telemetry = createTelemetry({
       provider,
-      model: provider === "codex_luna" ? config.codexModel : config.geminiModel,
+      model: runOptions.model || (provider === "codex_luna" ? config.codexModel : config.geminiModel),
       reasoningEffort: provider === "codex_luna" ? config.codexReasoningEffort : null,
       questionScopeId: ledger.scopeId,
     });
