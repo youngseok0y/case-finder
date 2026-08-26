@@ -57,7 +57,7 @@ call :startServer
 
 :menu
 echo.
-echo Fable Case Finder - http://127.0.0.1:%APP_PORT%
+echo Case Finder - http://127.0.0.1:%APP_PORT%
 echo [S] Start server   [R] Restart server   [X] Stop server   [Q] Quit
 choice /c SRXQ /n /m "Select: "
 if errorlevel 4 goto quit

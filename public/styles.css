@@ -99,8 +99,8 @@ button:disabled { cursor: wait; opacity: 0.55; }
 /* ── 결과 ────────────────────────────────────────────── */
 .result-area { padding: 0 0 96px; }
 .empty-state { margin: 24px 0 0; color: var(--muted); font-size: 0.9rem; }
-.fable-results .query { margin: 0; padding: 26px 0 0; border-top: 1px solid var(--line); font-size: 0.85rem; color: var(--muted); }
-.fable-results .query strong { overflow-wrap: anywhere; font-weight: 600; color: var(--ink); }
+.case-finder-results .query { margin: 0; padding: 26px 0 0; border-top: 1px solid var(--line); font-size: 0.85rem; color: var(--muted); }
+.case-finder-results .query strong { overflow-wrap: anywhere; font-weight: 600; color: var(--ink); }
 .intro { max-width: var(--measure); margin: 14px 0 0; color: var(--ink-2); line-height: 1.8; white-space: pre-wrap; }
 .result-section { margin-top: 46px; }
 .result-section > h2 { display: flex; align-items: baseline; gap: 10px; margin-bottom: 0; padding-bottom: 12px; border-bottom: 1px solid var(--line); }

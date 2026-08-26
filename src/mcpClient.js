@@ -119,7 +119,7 @@ async function connectOnce() {
   const params = buildMcpServerParameters();
   const nextTransport = new StdioClientTransport(params);
   const nextClient = new Client(
-    { name: "fable-case-finder", version: "0.1.0" },
+    { name: "case-finder", version: "0.1.0" },
     { capabilities: {} },
   );
 

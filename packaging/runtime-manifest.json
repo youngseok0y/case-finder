@@ -1,7 +1,7 @@
 {
   "version": "m11-codex-app-server-v1",
   "installer_entrypoint": "CaseFinderSetup.exe",
-  "install_root": "%LOCALAPPDATA%\\Fable\\CaseFinder",
+  "install_root": "%LOCALAPPDATA%\\CaseFinder",
   "layout": {
     "app": "app",
     "node": "runtime/node/node.exe",

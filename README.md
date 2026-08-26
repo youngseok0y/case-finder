@@ -1,6 +1,6 @@
 # Case Finder
 
-Case Finder is a local Fable-format legal precedent search application. It retrieves provider-authored Korean legal source material through the restricted legal MCP surface and shows only verified results.
+Case Finder is a local Korean legal precedent search application. It retrieves provider-authored legal source material through the restricted legal MCP surface and shows only verified results.
 
 ## Current product boundary
 

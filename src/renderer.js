@@ -116,10 +116,10 @@ export function renderResults(result = {}) {
         : `<p class="empty">${escapeHtml(NO_RESULT_MESSAGE)}</p>`;
       const lawSection = renderLawSection(result.lawReferences);
       const empty = `<section class="state-panel state-no-result" data-state="NO_RESULT"><h2>${STATE_HEADINGS.NO_RESULT}</h2>${rationale}</section>`;
-      return `<div class="fable-results" data-terminal-state="NO_RESULT">${query}${empty}${lawSection}</div>`;
+      return `<div class="case-finder-results" data-terminal-state="NO_RESULT">${query}${empty}${lawSection}</div>`;
     }
     const empty = state === "NO_RESULT" && result.route === "direct" ? renderDirectMiss() : renderStateMessage(state);
-    return `<div class="fable-results" data-terminal-state="${escapeHtml(state)}">${query}${empty}</div>`;
+    return `<div class="case-finder-results" data-terminal-state="${escapeHtml(state)}">${query}${empty}</div>`;
   }
 
   const items = (Array.isArray(result.items) ? result.items : []).filter((item) => item?.status === "verified");
@@ -143,5 +143,5 @@ export function renderResults(result = {}) {
   const ignored = result.ignoredCaseCount > 0
     ? `<p class="notice">사건번호는 최대 5개까지만 조회했습니다. 초과한 ${escapeHtml(result.ignoredCaseCount)}개는 무시했습니다.</p>`
     : "";
-  return `<div class="fable-results" data-terminal-state="SUCCESS">${query}${intro}${fallback}${ignored}<section class="result-section"><h2>${caseHeading}</h2>${cases}</section>${lawSection}</div>`;
+  return `<div class="case-finder-results" data-terminal-state="SUCCESS">${query}${intro}${fallback}${ignored}<section class="result-section"><h2>${caseHeading}</h2>${cases}</section>${lawSection}</div>`;
 }
