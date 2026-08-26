@@ -239,17 +239,26 @@ function renderServiceStatus(payload) {
   if (!payload) return;
   const engine = payload.adapter?.label || "확인 불가";
   const law = payload.mcp?.connected ? "연결됨" : "연결 확인 필요";
-  const quota = payload.quota?.codexQuota || {};
-  const windowSuffix = quota.windowLabel ? ` / ${quota.windowLabel}` : "";
-  const remaining = quota.remainingPercent === null || quota.remainingPercent === undefined || quota.remainingPercent === ""
-    ? null
-    : Number(quota.remainingPercent);
-  const quotaLabel = quota.loggedIn === false
-    ? "로그인 필요"
-    : quota.available === true && Number.isFinite(remaining)
-      ? `${Math.max(0, Math.min(100, remaining))}% 남음${windowSuffix}`
-      : "확인할 수 없음";
-  serviceStatus.innerHTML = `<div><span>검색 엔진</span><strong>${escapeHtml(engine)}</strong></div><div><span>법령 API</span><strong>${escapeHtml(law)}</strong></div><div><span>Codex 사용량</span><strong>${escapeHtml(quotaLabel)}</strong></div>`;
+  const adapterId = payload.adapter?.id;
+  let usageTitle = "Codex 사용량";
+  let usageLabel;
+  if (adapterId === "gemini_d") {
+    const geminiLabel = payload.quota?.gemini?.label;
+    usageTitle = "Gemini 사용량";
+    usageLabel = typeof geminiLabel === "string" && geminiLabel.trim() ? geminiLabel : "확인할 수 없음";
+  } else {
+    const quota = payload.quota?.codexQuota || {};
+    const windowSuffix = quota.windowLabel ? ` / ${quota.windowLabel}` : "";
+    const remaining = quota.remainingPercent === null || quota.remainingPercent === undefined || quota.remainingPercent === ""
+      ? null
+      : Number(quota.remainingPercent);
+    usageLabel = quota.loggedIn === false
+      ? "로그인 필요"
+      : quota.available === true && Number.isFinite(remaining)
+        ? `${Math.max(0, Math.min(100, remaining))}% 남음${windowSuffix}`
+        : "확인할 수 없음";
+  }
+  serviceStatus.innerHTML = `<div><span>검색 엔진</span><strong>${escapeHtml(engine)}</strong></div><div><span>법령 API</span><strong>${escapeHtml(law)}</strong></div><div><span>${escapeHtml(usageTitle)}</span><strong>${escapeHtml(usageLabel)}</strong></div>`;
 }
 
 async function loadServiceStatus() {

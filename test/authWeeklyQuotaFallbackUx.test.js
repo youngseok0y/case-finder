@@ -139,6 +139,11 @@ test("Admin and Index operating UI consume the shared dynamic quota fields", asy
   assert.match(appJs, /payload\?\.effectiveModel !== "gpt-5\.6-terra"/u);
   assert.doesNotMatch(appJs, /payload\.quota\?\.luna/iu);
   assert.doesNotMatch(appJs, /planType.*free/iu);
+  assert.match(appJs, /const adapterId = payload\.adapter\?\.id/u);
+  assert.match(appJs, /usageTitle = "Gemini 사용량"/u);
+  assert.match(appJs, /payload\.quota\?\.gemini\?\.label/u);
+  assert.match(appJs, /usageTitle = "Codex 사용량"/u);
+  assert.match(appJs, /payload\.quota\?\.codexQuota/u);
 });
 
 test("progress copy and search examples use the approved user-facing wording", async () => {
