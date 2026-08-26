@@ -1,5 +1,4 @@
 import { config } from "../../../config.js";
-import { normalizeLegalToolResult } from "../legalToolGateway.js";
 import { createSafetyController } from "../safety.js";
 import { createTelemetry } from "../telemetry.js";
 import { createCommonEvidenceEnvelope } from "../commonEvidenceEnvelope.js";
@@ -57,31 +56,6 @@ function nativeToolCall(event) {
   return event?.type === "tool_call" || event?.type === "mcp_tool_call";
 }
 
-function isLegalSearchTool(name) {
-  return name === "search_decisions" || name === "search_law";
-}
-
-function normalizeDelegatedToolResult(name, toolResult) {
-  if (toolResult && (
-    typeof toolResult.searchCompleted === "boolean"
-    || typeof toolResult.notFound === "boolean"
-    || typeof toolResult.hallucinationDetected === "boolean"
-  )) return toolResult;
-  if (toolResult?.items || toolResult?.caseNumber || toolResult?.rawText) {
-    if (!isLegalSearchTool(name)) return toolResult;
-    const rawText = typeof toolResult.rawText === "string" ? toolResult.rawText : "";
-    const notFound = rawText.includes("[NOT_FOUND]");
-    const hallucinationDetected = rawText.includes("[HALLUCINATION_DETECTED]");
-    return {
-      ...toolResult,
-      notFound,
-      hallucinationDetected,
-      searchCompleted: !hallucinationDetected && (!toolResult.isError || notFound),
-    };
-  }
-  return normalizeLegalToolResult(name, toolResult || {});
-}
-
 export function createCodexNativeAo({
   gateway,
   ledger = gateway.ledger,
@@ -101,50 +75,13 @@ export function createCodexNativeAo({
       telemetry.setQuestionScopeId(ledger.scopeId);
       const startedAt = Date.now();
       safety.assertCanContinue();
-      const acceptedSearchTools = new Set();
-      const recordDelegatedToolResult = ({ name, arguments: args = {}, result: toolResult } = {}) => {
-        const normalized = normalizeDelegatedToolResult(name, toolResult);
-        const searchCompleted = isLegalSearchTool(name) && normalized?.searchCompleted === true;
-        if (!normalized || (normalized.isError && !searchCompleted)) return;
-        if (searchCompleted) acceptedSearchTools.add(name);
-        const progressSnapshot = ledgerProgressEvent(ledger);
-        const progress = {
-          candidateCount: progressSnapshot.candidateCount,
-          verifiedCount: progressSnapshot.verifiedCount,
-          lawCount: progressSnapshot.lawCount,
-        };
-        if (name === "search_law" || name === "get_law_text") onProgress("LAW_EVIDENCE_UPDATED", progress);
-        if (name === "search_decisions") onProgress("CANDIDATES_FOUND", progress);
-        if (name === "get_decision_text") onProgress("DETAIL_VERIFIED", progress);
-        if (name === "search_decisions") {
-          ledger.recordDecisionSearch({ query: args?.query, domain: args?.domain, items: normalized.items || [] });
-        } else if (name === "search_law") {
-          ledger.recordLawSearch({ query: args?.query, items: normalized.items || [] });
-        } else if (name === "get_decision_text") {
-          ledger.recordDecisionDetail({
-            domain: args?.domain,
-            id: args?.id,
-            caseNumber: normalized.caseNumber,
-            detail: normalized,
-            rawText: normalized.rawText,
-            verified: true,
-          });
-        } else if (name === "get_law_text") {
-          ledger.recordLawText({
-            mst: args?.mst,
-            lawId: args?.lawId,
-            jo: args?.jo,
-            textOpened: Boolean(normalized.rawText),
-          });
-        }
-      };
+      let completedDecisionSearch = false;
       const session = await createSession({
         query,
         prompt: buildLunaNativePrompt(query),
         model,
         reasoningEffort: config.codexReasoningEffort,
         tools: CODEX_NATIVE_ALLOWED_TOOLS.map((name) => ({ name, kind: "legal", restricted: true })),
-        onDelegatedToolResult: recordDelegatedToolResult,
         abortSignal,
       });
       telemetry.setSessionId(session?.sessionId || session?.session_id || null);
@@ -208,15 +145,29 @@ export function createCodexNativeAo({
             }
             if (event.delegated === true) {
               safety.recordLegalToolCall();
-              telemetry.recordToolCall(name, {});
-              safety.noteEvidenceCount(ledgerProgress(ledger).evidenceCount);
-              continue;
+              telemetry.recordToolCall(name, { rejected: true, errorCode: "AO_V2_UNLEDGERED_TOOL_RESULT" });
+              telemetry.markProtocolInvalid();
+              telemetry.setStopReason("AO_V2_UNLEDGERED_TOOL_RESULT");
+              return {
+                provider: "codex_luna",
+                architecture: "AO_V2",
+                selected: [],
+                intro: "",
+                rejectedSelected: [],
+                protocolDiagnostics: [{ code: "AO_V2_UNLEDGERED_TOOL_RESULT", tool: name }],
+                output_valid: false,
+                model_protocol_clean: false,
+                selection_repaired: false,
+                protocolPass: false,
+                ledger: ledger.snapshot(),
+                telemetry: telemetry.snapshot(ledger),
+                elapsed_ms: Date.now() - startedAt,
+              };
             }
             const result = await gateway.execute(name, event.arguments || event.args || {});
-            if (isLegalSearchTool(name) && result?.searchCompleted === true) acceptedSearchTools.add(name);
+            if (name === "search_decisions" && result?.searchCompleted === true) completedDecisionSearch = true;
             if (typeof session.respondToToolCall !== "function") throw new Error("CODEX_NATIVE_SESSION_TOOL_RESPONSE_REQUIRED");
             await session.respondToToolCall({ callId: event.call_id || event.callId || null, name, result });
-            safety.noteEvidenceCount(ledgerProgress(ledger).evidenceCount);
             continue;
           }
           if (event.type === "final") {
@@ -249,7 +200,7 @@ export function createCodexNativeAo({
                 effectiveModel: modelResolution.effectiveModel,
               });
             }
-            if (acceptedSearchTools.size === 0) {
+            if (!completedDecisionSearch) {
               telemetry.markProtocolInvalid();
               telemetry.setStopReason("AO_V2_SEARCH_REQUIRED");
               return {

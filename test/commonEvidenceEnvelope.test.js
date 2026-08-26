@@ -162,23 +162,24 @@ test("common envelope exposes the same observed, verified, and selectable state"
 });
 
 test("Luna adapter receives the common envelope contract", async () => {
-  const sessionFactory = async ({ onDelegatedToolResult }) => {
+  const sessionFactory = async () => {
     let searched = false;
     return {
       async next() {
         if (!searched) {
           searched = true;
           const args = { domain: "precedent", query: "공통 evidence fixture" };
-          onDelegatedToolResult({ name: "search_decisions", arguments: args, result: { items: [] } });
-          return { type: "mcp_tool_call", delegated: true, name: "search_decisions", arguments: args, call_id: "search-1" };
+          return { type: "mcp_tool_call", delegated: false, name: "search_decisions", arguments: args, call_id: "search-1" };
         }
         return { type: "final", selection: { selected: [], intro: "" } };
       },
+      async respondToToolCall() {},
       async close() {},
     };
   };
   const search = createAgenticSearchV2({
     provider: "codex_luna",
+    gatewayOptions: { callTool: async () => ({ items: [] }) },
     adapterOptions: { createSession: sessionFactory },
   });
   const adapter = createLunaNativeAdapter({ createSearch: () => search });

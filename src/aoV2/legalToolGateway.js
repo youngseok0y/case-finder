@@ -32,11 +32,23 @@ function isSearchTool(name) {
   return name === "search_decisions" || name === "search_law";
 }
 
-function normalizeToolState(name, raw, rawText) {
+function hasExplicitSearchPayload(raw) {
+  return Boolean(
+    Array.isArray(raw?.items)
+    || Array.isArray(raw?.results)
+    || Array.isArray(raw?.structuredContent?.items)
+    || Array.isArray(raw?.structuredContent?.results)
+    || Number.isInteger(raw?.total),
+  );
+}
+
+function normalizeToolState(name, raw, rawText, parsedItems = false) {
   const notFound = rawText.includes("[NOT_FOUND]");
   const hallucinationDetected = rawText.includes("[HALLUCINATION_DETECTED]");
   const isError = Boolean(raw?.isError) || notFound || hallucinationDetected;
+  const hasSearchEvidence = notFound || hasExplicitSearchPayload(raw) || parsedItems;
   const searchCompleted = isSearchTool(name)
+    && hasSearchEvidence
     && !hallucinationDetected
     && (!raw?.isError || notFound);
   return { isError, notFound, hallucinationDetected, searchCompleted };
@@ -44,7 +56,6 @@ function normalizeToolState(name, raw, rawText) {
 
 export function normalizeLegalToolResult(name, raw) {
   const rawText = toolText(raw);
-  const state = normalizeToolState(name, raw, rawText);
   if (name === "search_decisions") {
     const items = parseDecisionSearchResults(rawText).map((item) => ({
       id: item.id,
@@ -55,6 +66,7 @@ export function normalizeLegalToolResult(name, raw) {
       caseType: item.caseType || "",
       type: item.type || "",
     }));
+    const state = normalizeToolState(name, raw, rawText, items.length > 0);
     return { ...state, total: items.length, items, rawText };
   }
   if (name === "search_law") {
@@ -64,9 +76,11 @@ export function normalizeLegalToolResult(name, raw) {
       mst: item.mst,
       link: item.link,
     }));
+    const state = normalizeToolState(name, raw, rawText, items.length > 0);
     return { ...state, total: items.length, items, rawText };
   }
   if (name === "get_decision_text") {
+    const state = normalizeToolState(name, raw, rawText);
     const detail = parseDecisionDetail(rawText);
     return {
       ...state,
@@ -79,7 +93,7 @@ export function normalizeLegalToolResult(name, raw) {
       rawText,
     };
   }
-  if (name === "get_law_text") return { ...state, rawText };
+  if (name === "get_law_text") return { ...normalizeToolState(name, raw, rawText), rawText };
   return errorResult("UNKNOWN_TOOL", `Unsupported legal tool: ${name}`);
 }
 

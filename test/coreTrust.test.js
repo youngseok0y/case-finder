@@ -75,3 +75,22 @@ test("definitive NOT_FOUND search remains an error but records a completed searc
   assert.equal(result.searchCompleted, true);
   assert.equal(ledger.snapshot().searchTraces.length, 1);
 });
+
+test("empty or structurally invalid search responses are not completed searches", async () => {
+  for (const raw of [{}, { content: [] }, { content: [{ type: "image", data: "fixture" }] }]) {
+    const gateway = createLegalToolGateway({
+      callTool: async () => raw,
+    });
+    const normalized = await gateway.execute("search_decisions", { domain: "precedent", query: "empty response" });
+    assert.equal(normalized.searchCompleted, false);
+  }
+});
+
+test("explicit empty search payload is a completed search", async () => {
+  const gateway = createLegalToolGateway({
+    callTool: async () => ({ items: [] }),
+  });
+  const result = await gateway.execute("search_decisions", { domain: "precedent", query: "empty payload" });
+  assert.equal(result.searchCompleted, true);
+  assert.equal(result.total, 0);
+});

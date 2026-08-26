@@ -144,6 +144,7 @@ export function finalizeSelection(selection, ledger, { resultMax = 5 } = {}) {
   });
   protocolDiagnostics.push(...narrative.diagnostics);
   const selectionRepaired = !selectionShapeValid || rejectedSelected.length > 0 || narrative.sanitized || selected.length > resultMax;
+  // output_valid describes the post-gate safety of the result; repaired output may be valid even when model_protocol_clean is false.
   const outputValid = true;
   const modelProtocolClean = selectionShapeValid && rejectedSelected.length === 0 && selected.length <= resultMax;
   if (selected.length > resultMax) protocolDiagnostics.push({ code: "RESULT_MAX_TRUNCATED" });

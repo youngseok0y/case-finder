@@ -18,8 +18,9 @@ test("selected plan model reaches the AO session without changing the session po
     const captured = {};
     const search = createAgenticSearchV2({
       provider: "codex_luna",
+      gatewayOptions: { callTool: async () => ({ items: [] }) },
       adapterOptions: {
-        createSession: async ({ model, onDelegatedToolResult }) => {
+        createSession: async ({ model }) => {
           captured.model = model;
           let searched = false;
           return {
@@ -27,11 +28,11 @@ test("selected plan model reaches the AO session without changing the session po
               if (!searched) {
                 searched = true;
                 const args = { domain: "precedent", query: "model selection fixture" };
-                onDelegatedToolResult({ name: "search_decisions", arguments: args, result: { items: [] } });
-                return { type: "mcp_tool_call", delegated: true, name: "search_decisions", arguments: args, call_id: "search-1" };
+                return { type: "mcp_tool_call", delegated: false, name: "search_decisions", arguments: args, call_id: "search-1" };
               }
               return { type: "final", selection: { selected: [], intro: "" } };
             },
+            async respondToToolCall() {},
             async close() {},
           };
         },
