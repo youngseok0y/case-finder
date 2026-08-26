@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { config } from "../config.js";
 import { generatePlan, runtimeName, selectCandidates } from "./geminiRuntime.js";
 import {
@@ -49,22 +51,85 @@ function dateNumber(value) {
   return /^\d{8}$/.test(digits) ? Number(digits) : 0;
 }
 
-export function rankCandidates(candidates, { applyPreviewPenalty = false } = {}) {
+const QUERY_KIND_WEIGHT = Object.freeze({ anchor: 20, support: 10 });
+
+function queryEvidenceKey(entry) {
+  return `${entry?.domain || ""}\u0000${entry?.query || ""}`;
+}
+
+function providerRankBonus(rank) {
+  if (rank === 1) return 5;
+  if (rank <= 3) return 4;
+  if (rank <= 5) return 3;
+  if (rank <= 10) return 2;
+  return 1;
+}
+
+function queryEvidenceScore(entry) {
+  return (QUERY_KIND_WEIGHT[entry?.kind] || 0) + providerRankBonus(Number(entry?.providerRank || 20));
+}
+
+function candidateMatchedQueries(candidate) {
+  return Array.isArray(candidate?.matchedQueries) ? candidate.matchedQueries : [];
+}
+
+function refreshCandidateEvidence(candidate) {
+  const distinct = new Map();
+  for (const entry of candidateMatchedQueries(candidate)) {
+    const key = queryEvidenceKey(entry);
+    const previous = distinct.get(key);
+    if (!previous || Number(entry.providerRank || 20) < Number(previous.providerRank || 20)) distinct.set(key, entry);
+  }
+  candidate.matchedQueries = [...distinct.values()];
+  candidate.distinctQueryCount = candidate.matchedQueries.length;
+  const best = candidateBestEvidence(candidate);
+  candidate.bestQueryKind = best.kind;
+  candidate.bestProviderRank = best.providerRank;
+}
+
+function candidateDistinctQueryCount(candidate) {
+  if (Number.isInteger(candidate?.distinctQueryCount)) return candidate.distinctQueryCount;
+  return new Set(candidateMatchedQueries(candidate).map(queryEvidenceKey)).size;
+}
+
+function candidateBestEvidence(candidate) {
+  const entries = candidateMatchedQueries(candidate);
+  if (entries.length === 0) return { kind: "", providerRank: null, score: 0 };
+  const best = [...entries].sort((left, right) => queryEvidenceScore(right) - queryEvidenceScore(left)
+    || Number(left.providerRank || 20) - Number(right.providerRank || 20))[0];
+  return {
+    kind: best.kind || "",
+    providerRank: Number.isInteger(best.providerRank) ? best.providerRank : null,
+    score: queryEvidenceScore(best),
+  };
+}
+
+function candidateAuthority(candidate) {
+  if (candidate?.domain === "constitutional") return 5;
+  if (candidateMatchedQueries(candidate).some((entry) => entry.domain === "constitutional")) return 5;
+  return courtWeight(candidate?.court);
+}
+
+export function rankCandidates(candidates, { applyPreviewPenalty = false, limit = true } = {}) {
   const dates = candidates.map((candidate) => dateNumber(candidate.date)).filter(Boolean);
   const minDate = dates.length > 0 ? Math.min(...dates) : 0;
   const maxDate = dates.length > 0 ? Math.max(...dates) : 0;
-  return candidates
+  const ranked = candidates
     .map((candidate) => {
       const currentDate = dateNumber(candidate.date);
       const recency = maxDate > minDate && currentDate > 0 ? (currentDate - minDate) / (maxDate - minDate) : 0;
       const previewPenalty = applyPreviewPenalty && !String(candidate.preview || "").trim()
         ? config.previewMissingPenalty
         : 0;
-      const score = (candidate.matchedKeywords.size * 10) + courtWeight(candidate.court) + recency - previewPenalty;
+      const score = candidateBestEvidence(candidate).score
+        + Math.min(Math.max(candidateDistinctQueryCount(candidate) - 1, 0), 3)
+        + candidateAuthority(candidate)
+        + (recency * 0.1)
+        - previewPenalty;
       return { ...candidate, score, recency };
     })
-    .sort((left, right) => right.score - left.score || dateNumber(right.date) - dateNumber(left.date) || left.caseNumber.localeCompare(right.caseNumber) || String(left.id).localeCompare(String(right.id)))
-    .slice(0, config.candidateMax);
+    .sort((left, right) => right.score - left.score || dateNumber(right.date) - dateNumber(left.date) || left.caseNumber.localeCompare(right.caseNumber) || String(left.id).localeCompare(String(right.id)));
+  return limit ? ranked.slice(0, config.candidateMax) : ranked;
 }
 
 async function previewCandidate(candidate, telemetry = null) {
@@ -91,7 +156,7 @@ async function previewCandidate(candidate, telemetry = null) {
 }
 
 export function fallbackPlan(query) {
-  return { keywords: [query], law_names: [], domains: ["precedent"] };
+  return { queries: [{ query, domain: "precedent", kind: "anchor" }], law_names: [] };
 }
 
 export function getFallbackLabel(error) {
@@ -101,11 +166,15 @@ export function getFallbackLabel(error) {
 }
 
 export async function collectCandidates(plan, telemetry = null) {
-  const jobs = plan.keywords.flatMap((keyword) => plan.domains.map((domain) => ({ keyword, domain })));
+  const jobs = plan.queries.map((entry) => ({
+    query: entry.query,
+    domain: entry.domain,
+    kind: entry.kind,
+  }));
   const searchResults = await mapWithConcurrency(jobs, config.searchConcurrency, async (job) => {
     const result = await trackedCallTool("search_decisions", {
       domain: job.domain,
-      query: job.keyword,
+      query: job.query,
       display: config.searchDisplay,
       options: { search: 2 },
     }, telemetry);
@@ -124,37 +193,62 @@ export async function collectCandidates(plan, telemetry = null) {
       .filter(Boolean)
       .map(caseNumberKey));
     if (telemetry?.dTrace && job) {
-      queryStats.push({
+      const queryStat = {
         query_index: queryIndex,
-        query_hash: hashTraceValue(`${job.domain}\u0000${job.keyword}`),
+        query_hash: hashTraceValue(`${job.domain}\u0000${job.query}\u0000${job.kind}`),
         domain: job.domain,
         reported_total_results: null,
         exposed_result_count: parsedResults.length,
         unique_candidate_yield: uniqueQueryKeys.size,
         duplicate_candidate_yield: Math.max(0, parsedResults.length - uniqueQueryKeys.size),
         is_error: Boolean(entry.error || entry.value?.result?.isError),
-      });
+      };
+      queryStats.push(queryStat);
+      if (telemetry.diagnosticTrace) {
+        telemetry.diagnosticTrace.search_queries.push({
+          ...queryStat,
+          query: job.query,
+          kind: job.kind,
+          result_case_numbers: parsedResults
+            .map((item) => normalizeCaseNumber(item.caseNumber) || String(item.caseNumber || "").trim())
+            .filter(Boolean),
+          result_count: parsedResults.length,
+        });
+      }
     }
     if (entry.error || entry.value?.result?.isError) continue;
     const text = rawText;
     if (!text || text.includes("[NOT_FOUND]")) continue;
-    for (const item of parsedResults) {
+    for (const [providerIndex, item] of parsedResults.entries()) {
       const caseNumber = normalizeCaseNumber(item.caseNumber);
       if (!caseNumber) continue;
       const key = caseNumberKey(caseNumber);
+      const evidence = {
+        query: job.query,
+        domain: job.domain,
+        kind: job.kind,
+        providerRank: providerIndex + 1,
+      };
       const existing = byCaseNumber.get(key);
       if (existing) {
-        existing.matchedKeywords.add(entry.value.keyword);
+        const existingEvidence = existing.matchedQueries.find((candidate) => queryEvidenceKey(candidate) === queryEvidenceKey(evidence));
+        if (existingEvidence) existingEvidence.providerRank = Math.min(existingEvidence.providerRank, evidence.providerRank);
+        else existing.matchedQueries.push(evidence);
+        refreshCandidateEvidence(existing);
         continue;
       }
       byCaseNumber.set(key, {
         ...item,
         caseNumber,
         domain: entry.value.domain,
-        matchedKeywords: new Set([entry.value.keyword]),
+        matchedQueries: [evidence],
+        bestQueryKind: evidence.kind,
+        bestProviderRank: evidence.providerRank,
+        distinctQueryCount: 1,
       });
     }
   }
+  const rawCandidates = [...byCaseNumber.values()];
   if (telemetry?.dTrace) {
     telemetry.dTrace.search_queries = queryStats;
     const resultCounts = queryStats.map((query) => query.exposed_result_count);
@@ -173,17 +267,19 @@ export async function collectCandidates(plan, telemetry = null) {
         ? null
         : Math.sqrt(yields.reduce((sum, value) => sum + ((value - yieldMean) ** 2), 0) / yields.length),
     };
-    const rawCandidates = [...byCaseNumber.values()];
     telemetry.dTrace.candidates.raw_summary = candidateSummary(rawCandidates);
     telemetry.dTrace.candidates.raw_candidate_count = rawCandidates.length;
     telemetry.dTrace.candidates.single_query_candidate_ratio = rawCandidates.length === 0
       ? null
-      : rawCandidates.filter((candidate) => candidateKeywordCount(candidate) === 1).length / rawCandidates.length;
+      : rawCandidates.filter((candidate) => candidateQueryCount(candidate) === 1).length / rawCandidates.length;
     telemetry.dTrace.candidates.multi_query_candidate_ratio = rawCandidates.length === 0
       ? null
-      : rawCandidates.filter((candidate) => candidateKeywordCount(candidate) > 1).length / rawCandidates.length;
+      : rawCandidates.filter((candidate) => candidateQueryCount(candidate) > 1).length / rawCandidates.length;
   }
-  return [...byCaseNumber.values()];
+  if (telemetry?.diagnosticTrace) {
+    telemetry.diagnosticTrace.raw_candidates = rawCandidates.map((candidate) => diagnosticCandidate(candidate));
+  }
+  return rawCandidates;
 }
 
 function normalizeLawName(value) {
@@ -192,6 +288,56 @@ function normalizeLawName(value) {
 
 function hashTraceValue(value) {
   return crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
+}
+
+function diagnosticCandidate(candidate, rank = null) {
+  const bestEvidence = candidateBestEvidence(candidate);
+  const item = {
+    caseNumber: String(candidate?.caseNumber || ""),
+    domain: String(candidate?.domain || ""),
+    matchedQueries: candidateMatchedQueries(candidate).map((entry) => ({
+      query: String(entry.query || ""),
+      domain: String(entry.domain || ""),
+      kind: String(entry.kind || ""),
+      providerRank: Number(entry.providerRank || 0),
+    })),
+    bestQueryKind: candidate.bestQueryKind || bestEvidence.kind || null,
+    bestProviderRank: candidate.bestProviderRank ?? bestEvidence.providerRank,
+    distinctQueryCount: candidateDistinctQueryCount(candidate),
+    court: String(candidate?.court || ""),
+    date: String(candidate?.date || ""),
+  };
+  if (rank !== null) item.rank = rank;
+  if (candidate?.id !== undefined && candidate?.id !== null) item.id = String(candidate.id);
+  if (Number.isFinite(candidate?.score)) item.score = candidate.score;
+  if (Number.isFinite(candidate?.recency)) item.recency = candidate.recency;
+  if (candidate?.preview !== undefined) item.preview_present = Boolean(String(candidate.preview || "").trim());
+  return item;
+}
+
+function createDiagnosticTrace(query) {
+  return {
+    schema_version: "m6e-d-diagnostic-v1",
+    query,
+    plan: { queries: [], law_names: [] },
+    search_queries: [],
+    raw_candidates: [],
+    initial_ranked_candidates: [],
+    initial_ranked_before_candidate_max: [],
+    preview_candidates: [],
+    final_ranked_candidates: [],
+    selected: [],
+  };
+}
+
+async function appendDiagnosticTrace(tracePath, trace) {
+  try {
+    const resolvedPath = path.resolve(tracePath);
+    await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
+    await fs.appendFile(resolvedPath, `${JSON.stringify(trace)}\n`, "utf8");
+  } catch {
+    // Diagnostic output must never alter product search behavior.
+  }
 }
 
 function numericSummary(values) {
@@ -208,17 +354,15 @@ function numericSummary(values) {
     max: sorted[sorted.length - 1],
   };
 }
-function candidateKeywordCount(candidate) {
-  return candidate?.matchedKeywords instanceof Set
-    ? candidate.matchedKeywords.size
-    : Array.isArray(candidate?.matchedKeywords) ? candidate.matchedKeywords.length : 0;
+function candidateQueryCount(candidate) {
+  return candidateDistinctQueryCount(candidate);
 }
 
 function candidateSummary(candidates) {
-  const keywordCounts = candidates.map(candidateKeywordCount);
+  const queryCounts = candidates.map(candidateQueryCount);
   return {
     count: candidates.length,
-    matched_keywords: numericSummary(keywordCounts),
+    distinct_queries: numericSummary(queryCounts),
     preview_present_count: candidates.filter((candidate) => Boolean(String(candidate.preview || "").trim())).length,
     preview_missing_count: candidates.filter((candidate) => !String(candidate.preview || "").trim()).length,
   };
@@ -274,7 +418,7 @@ function recordSelectionTrace(trace, selection, candidates) {
   const selectedCandidates = selected
     .map((item) => candidates.find((candidate) => caseNumberIncludes(candidate.caseNumber, item.case_no)))
     .filter(Boolean);
-  const keywordCounts = selectedCandidates.map(candidateKeywordCount);
+  const queryCounts = selectedCandidates.map(candidateQueryCount);
   const previewPresent = selectedCandidates.filter((candidate) => Boolean(String(candidate.preview || "").trim())).length;
   trace.raw_selection = {
     raw_selected_count: selected.length,
@@ -286,7 +430,7 @@ function recordSelectionTrace(trace, selection, candidates) {
       .map((item) => caseNumberKey(item.case_no))
       .filter(Boolean)
       .map(hashTraceValue),
-    raw_selected_matched_keywords: numericSummary(keywordCounts),
+    raw_selected_distinct_queries: numericSummary(queryCounts),
     raw_selected_preview_present_count: previewPresent,
     raw_selected_preview_missing_count: selectedCandidates.length - previewPresent,
   };
@@ -346,7 +490,15 @@ function closedWorldSelections(selection, candidates) {
 }
 
 export async function prepareCandidates(candidates, telemetry = null) {
+  const diagnosticTrace = telemetry?.diagnosticTrace || null;
+  const initialRankedBeforeCandidateMax = diagnosticTrace
+    ? rankCandidates(candidates, { limit: false })
+    : null;
   const initialCandidates = rankCandidates(candidates);
+  if (diagnosticTrace) {
+    diagnosticTrace.initial_ranked_before_candidate_max = initialRankedBeforeCandidateMax.map((candidate, index) => diagnosticCandidate(candidate, index + 1));
+    diagnosticTrace.initial_ranked_candidates = initialCandidates.map((candidate, index) => diagnosticCandidate(candidate, index + 1));
+  }
   if (telemetry?.dTrace) {
     telemetry.dTrace.candidates.initial_ranked_candidate_count = initialCandidates.length;
     telemetry.dTrace.candidates.top5_summary = candidateSummary(initialCandidates.slice(0, 5));
@@ -354,6 +506,9 @@ export async function prepareCandidates(candidates, telemetry = null) {
   }
   const previewEntries = await mapWithConcurrency(initialCandidates, config.searchConcurrency, (candidate) => previewCandidate(candidate, telemetry));
   const previewCandidates = previewEntries.filter((entry) => !entry.error).map((entry) => entry.value);
+  if (diagnosticTrace) {
+    diagnosticTrace.preview_candidates = previewCandidates.map((candidate, index) => diagnosticCandidate(candidate, index + 1));
+  }
   if (telemetry?.dTrace) {
     const top5Preview = previewEntries.slice(0, 5).filter((entry) => !entry.error).map((entry) => entry.value);
     telemetry.dTrace.candidates.preview_candidate_count = previewCandidates.length;
@@ -364,6 +519,9 @@ export async function prepareCandidates(candidates, telemetry = null) {
       : telemetry.dTrace.candidates.top5_preview_missing_count / top5Preview.length;
   }
   const rankedCandidates = rankCandidates(previewCandidates, { applyPreviewPenalty: true });
+  if (diagnosticTrace) {
+    diagnosticTrace.final_ranked_candidates = rankedCandidates.map((candidate, index) => diagnosticCandidate(candidate, index + 1));
+  }
   if (telemetry?.dTrace) {
     telemetry.dTrace.candidates.final_ranked_candidate_count = rankedCandidates.length;
     telemetry.dTrace.candidates.ranking_after_preview_penalty = rankingSummary(rankedCandidates);
@@ -435,7 +593,9 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     ? (pinnedRuntime.reasoningEffort === undefined ? reasoningEffort : pinnedRuntime.reasoningEffort)
     : dependencies.reasoningEffort;
   const traceEnabled = process.env.M6E_D_TRACE === "1";
+  const diagnosticTracePath = traceEnabled ? String(process.env.M6E_D_TRACE_PATH || "").trim() : "";
   const dTrace = traceEnabled ? createDTrace() : null;
+  const diagnosticTrace = diagnosticTracePath ? createDiagnosticTrace(query) : null;
   const telemetry = {
     runtime: effectiveRuntimeName,
     model: effectiveModelName,
@@ -460,7 +620,10 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     mcpDetailCalls: 0,
     elapsedMs: 0,
     dTrace,
+    diagnosticTrace,
+    diagnosticTracePath,
   };
+  if (typeof dependencies.executeTool === "function") telemetry.executeTool = dependencies.executeTool;
   const generatePlanFn = dependencies.generatePlan || pinnedRuntime.generatePlan || generatePlan;
   const collectCandidatesFn = dependencies.collectCandidates || collectCandidates;
   const searchRelatedLawsFn = dependencies.searchRelatedLaws || searchRelatedLaws;
@@ -480,9 +643,20 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
   }
   if (dTrace) {
     dTrace.plan = {
-      keyword_count: plan.keywords.length,
-      domain_count: plan.domains.length,
+      query_count: plan.queries.length,
+      anchor_query_count: plan.queries.filter((entry) => entry.kind === "anchor").length,
+      support_query_count: plan.queries.filter((entry) => entry.kind === "support").length,
       law_name_count: plan.law_names.length,
+    };
+  }
+  if (diagnosticTrace) {
+    diagnosticTrace.plan = {
+      queries: Array.isArray(plan.queries) ? plan.queries.map((entry) => ({
+        query: entry.query,
+        domain: entry.domain,
+        kind: entry.kind,
+      })) : [],
+      law_names: Array.isArray(plan.law_names) ? [...plan.law_names] : [],
     };
   }
   reportProgress("ANALYSIS_COMPLETE");
@@ -544,6 +718,15 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
       selected_validation_failed_count: (finalResult.items || []).filter((item) => item.status !== "verified").length,
     };
     dTrace.candidates.verified_candidate_count = dTrace.final_selection.selected_verified_count;
+  }
+  if (diagnosticTrace) {
+    diagnosticTrace.selected = Array.isArray(finalResult.selected)
+      ? finalResult.selected.map((item) => ({
+        caseNumber: String(item?.caseNumber || item?.case_no || ""),
+        match: String(item?.match || ""),
+      })).filter((item) => item.caseNumber)
+      : [];
+    await appendDiagnosticTrace(diagnosticTracePath, diagnosticTrace);
   }
   telemetry.elapsedMs = Date.now() - startedAt;
   return {

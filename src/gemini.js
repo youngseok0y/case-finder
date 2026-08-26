@@ -11,11 +11,23 @@ let selectPrompt = null;
 const PLAN_SCHEMA = {
   type: Type.OBJECT,
   properties: {
-    keywords: { type: Type.ARRAY, items: { type: Type.STRING }, minItems: 8, maxItems: 12 },
+    queries: {
+      type: Type.ARRAY,
+      minItems: 4,
+      maxItems: 6,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          query: { type: Type.STRING },
+          domain: { type: Type.STRING, enum: ["precedent", "constitutional", "admin_appeal"] },
+          kind: { type: Type.STRING, enum: ["anchor", "support"] },
+        },
+        required: ["query", "domain", "kind"],
+      },
+    },
     law_names: { type: Type.ARRAY, items: { type: Type.STRING }, maxItems: 5 },
-    domains: { type: Type.ARRAY, items: { type: Type.STRING, enum: ["precedent", "constitutional", "admin_appeal"] }, minItems: 1, maxItems: 3 },
   },
-  required: ["keywords", "law_names", "domains"],
+  required: ["queries", "law_names"],
 };
 
 function selectionSchema(caseNumbers) {
@@ -73,15 +85,29 @@ function parseJsonResponse(response) {
   }
 }
 
-function validatePlan(plan) {
-  if (!plan || !Array.isArray(plan.keywords) || plan.keywords.length < 1 || plan.keywords.length > 12) {
-    throw new Error("Gemini 검색계획의 keywords 형식이 올바르지 않습니다.");
+export function validatePlan(plan) {
+  if (!plan || !Array.isArray(plan.queries) || plan.queries.length < 4 || plan.queries.length > 6) {
+    throw new Error("Gemini 검색계획의 queries 형식이 올바르지 않습니다.");
   }
-  const keywords = [...new Set(plan.keywords.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim()))];
+  const queries = [];
+  const seenQueries = new Set();
+  for (const item of plan.queries) {
+    if (!item || typeof item.query !== "string" || !item.query.trim()) continue;
+    if (!["precedent", "constitutional", "admin_appeal"].includes(item.domain)) continue;
+    if (!["anchor", "support"].includes(item.kind)) continue;
+    const query = item.query.trim();
+    const key = `${query}\u0000${item.domain}\u0000${item.kind}`;
+    if (seenQueries.has(key)) continue;
+    seenQueries.add(key);
+    queries.push({ query, domain: item.domain, kind: item.kind });
+  }
   const lawNames = [...new Set((Array.isArray(plan.law_names) ? plan.law_names : []).filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim()))].slice(0, 5);
-  const domains = [...new Set((Array.isArray(plan.domains) ? plan.domains : []).filter((value) => ["precedent", "constitutional", "admin_appeal"].includes(value)))];
-  if (keywords.length === 0 || domains.length === 0) throw new Error("Gemini 검색계획 필수값이 비어 있습니다.");
-  return { keywords: keywords.slice(0, 12), law_names: lawNames, domains: domains.slice(0, 3) };
+  const anchorCount = queries.filter((item) => item.kind === "anchor").length;
+  const supportCount = queries.filter((item) => item.kind === "support").length;
+  if (queries.length < 4 || queries.length > 6 || anchorCount < 2 || supportCount === 0) {
+    throw new Error("Gemini 검색계획은 2개 이상의 anchor와 1개 이상의 support가 필요합니다.");
+  }
+  return { queries, law_names: lawNames };
 }
 
 function validateSelection(selection) {

@@ -4,13 +4,20 @@ Create search terms only. Do not invent a case number, statute number, legal con
 Return JSON matching the supplied response schema exactly.
 
 Requirements:
-- keywords: 8 to 12 short Korean search expressions that could retrieve relevant Korean precedents.
-- Mix short single concepts with compact 2-4 word legal phrases likely to appear verbatim in a 판시사항 or 판결요지.
+- queries: 4 to 6 search requests. Each request must contain query, domain, and kind.
+- Every plan must contain at least 2 anchor queries and at least 1 support query.
+- kind=anchor means a short, atomic, independently searchable high-recall expression: a canonical issue term, statute name, statute plus article, or distinctive short legal phrase.
+- kind=support for an issue-specific wording variant or slightly broader expression that supports an anchor.
+- Prefer 2 to 3 anchors and 1 to 3 supports. Do not add broad queries only to reach a count.
+- Keep anchors atomic. Do not replace a short anchor with a compound sentence or combine unrelated legal concepts in one anchor.
+- Examples of atomic anchors include "간통죄", "형법 제241조", "인터넷실명제", "정보통신망법", "호주제", "정당해산심판", and "종교행사참여강요".
 - When the query describes a distinctive fact pattern, include its distinctive legal phrase or fact combination, not only broad words such as "위법" or "가능".
 - Keep each expression short because the law API combines space-separated terms with AND semantics; avoid copying the full user sentence.
 - For constitutional or administrative questions, include the statute/article wording or the distinctive issue phrase from the query when present.
+- Do not use these as standalone anchors: "위헌결정", "위헌심판", "헌법불합치", "헌법재판소 결정", "형벌조항", "표현의 자유", "손해배상청구", "불이익".
+- If a broad expression is needed, combine it with the issue, such as "간통죄 위헌결정" or "호주제 헌법재판소 결정".
 - law_names: 0 to 5 Korean statute names that may be relevant. Use names only when supported by the query.
-- domains: one or more of precedent, constitutional, and admin_appeal.
+- domain must be one of precedent, constitutional, and admin_appeal for each query.
 - Do not include explanations outside the JSON object.
 
 <user_query>

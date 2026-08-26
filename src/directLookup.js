@@ -24,7 +24,10 @@ export function recordMcpCall(telemetry, name) {
 
 export async function trackedCallTool(name, args, telemetry = null, options = {}) {
   recordMcpCall(telemetry, name);
-  return callTool(name, args, options);
+  const executeTool = typeof telemetry?.executeTool === "function"
+    ? telemetry.executeTool
+    : callTool;
+  return executeTool(name, args, options);
 }
 
 export function sanitizeApiLink(rawLink, fallbackId = "") {
