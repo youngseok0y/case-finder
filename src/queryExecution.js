@@ -21,17 +21,6 @@ function candidateCount(result) {
 }
 
 function responseForResult({ query, route, result, stage }) {
-  if (stage === "DIRECT") {
-    return {
-      ok: true,
-      service: PRODUCT_SERVICE,
-      stage: "DIRECT",
-      route,
-      query,
-      html: renderResults(result),
-      result,
-    };
-  }
   return {
     ok: true,
     service: PRODUCT_SERVICE,

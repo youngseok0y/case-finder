@@ -14,26 +14,7 @@ export class GeminiLimitExceededError extends Error {
   }
 }
 
-function pacificDate(now = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(now);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
-}
-
-function emptyUsage(date = pacificDate()) {
-  return { date, callsToday: 0, recentCalls: [] };
-}
-
-function sleep(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-function pacificDateFor(now) {
+function pacificDateFor(now = Date.now()) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Los_Angeles",
     year: "numeric",
@@ -42,6 +23,14 @@ function pacificDateFor(now) {
   }).formatToParts(new Date(now));
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
+}
+
+function emptyUsage(date = pacificDateFor()) {
+  return { date, callsToday: 0, recentCalls: [] };
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 export function createGeminiRateLimiter(options = {}) {

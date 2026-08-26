@@ -204,21 +204,6 @@ export class LegalToolGateway {
     return this.trace.map((item) => ({ ...item, args: item.args ? { ...item.args } : undefined }));
   }
 
-  searchDecisions(args, context) {
-    return this.execute("search_decisions", args, context);
-  }
-
-  searchLaw(args, context) {
-    return this.execute("search_law", args, context);
-  }
-
-  getDecisionText(args, context) {
-    return this.execute("get_decision_text", args, context);
-  }
-
-  getLawText(args, context) {
-    return this.execute("get_law_text", args, context);
-  }
 }
 
 export function createLegalToolGateway(options) {
