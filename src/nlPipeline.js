@@ -568,6 +568,7 @@ export async function finalizeSelection({
     query,
     intro: safeSelection.intro,
     fallbackLabel,
+    support: safeSelection.support || null,
     lawReferences,
     candidateCaseNumbers: candidatePool.map((candidate) => candidate.caseNumber),
     selected: selectedCandidates.map((candidate) => ({ caseNumber: candidate.caseNumber, match: candidate.match })),

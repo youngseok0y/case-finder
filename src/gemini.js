@@ -30,12 +30,15 @@ const PLAN_SCHEMA = {
   required: ["queries", "law_names"],
 };
 
+const SUPPORT_VALUES = Object.freeze(["direct", "related_only", "none"]);
+
 function selectionSchema(caseNumbers) {
   const caseNumberSchema = { type: Type.STRING };
   if (caseNumbers.length > 0) caseNumberSchema.enum = caseNumbers;
   return {
     type: Type.OBJECT,
     properties: {
+      support: { type: Type.STRING, enum: SUPPORT_VALUES },
       selected: {
         type: Type.ARRAY,
         maxItems: config.resultMax,
@@ -50,7 +53,7 @@ function selectionSchema(caseNumbers) {
       },
       intro: { type: Type.STRING },
     },
-    required: ["selected", "intro"],
+    required: ["support", "selected", "intro"],
   };
 }
 
@@ -110,12 +113,27 @@ export function validatePlan(plan) {
   return { queries, law_names: lawNames };
 }
 
-function validateSelection(selection) {
+export function validateSelection(selection) {
   if (!selection || !Array.isArray(selection.selected)) throw new Error("Gemini 선별 응답의 selected 형식이 올바르지 않습니다.");
-  return {
-    selected: selection.selected.slice(0, config.resultMax).filter((item) => item && typeof item.case_no === "string" && (item.match === "direct" || item.match === "related")),
-    intro: typeof selection.intro === "string" ? selection.intro.trim() : "",
-  };
+  const intro = typeof selection.intro === "string" ? selection.intro.trim() : "";
+  const selected = selection.selected
+    .slice(0, config.resultMax)
+    .filter((item) => item && typeof item.case_no === "string" && (item.match === "direct" || item.match === "related"));
+  const support = SUPPORT_VALUES.includes(selection.support) ? selection.support : "none";
+  if (support === "none") return { support, selected: [], intro };
+  if (support === "related_only") {
+    return {
+      support,
+      selected: selected.map((item) => ({ ...item, match: "related" })),
+      intro,
+    };
+  }
+  if (!selected.some((item) => item.match === "direct")) {
+    return selected.length > 0
+      ? { support: "related_only", selected: selected.map((item) => ({ ...item, match: "related" })), intro }
+      : { support: "none", selected: [], intro };
+  }
+  return { support, selected, intro };
 }
 
 function isRateLimitError(error) {
@@ -180,7 +198,7 @@ export async function generatePlan(query, telemetry = null) {
 }
 
 export async function selectCandidates(query, candidates, telemetry = null) {
-  if (candidates.length === 0) return { selected: [], intro: "" };
+  if (candidates.length === 0) return { support: "none", selected: [], intro: "" };
   const candidateText = candidates.map((candidate) => JSON.stringify({
     case_no: candidate.caseNumber,
     title: candidate.title,

@@ -5,7 +5,12 @@ Do not provide legal advice or a legal conclusion.
 Return JSON matching the supplied response schema exactly.
 
 Requirements:
+- support: exactly one of direct, related_only, or none.
 - selected: at most 5 candidate entries. Use match=direct only for a strong match to the user's expressed issue; otherwise use related.
+- support=direct requires at least one selected item with match=direct. Related supporting cases may also be selected with match=related.
+- support=related_only means the candidates are legally relevant but do not directly resolve the core issue; every selected item must use match=related.
+- support=none means no candidate substantively supports the user's question; return selected as an empty array.
+- Do not select a case merely because it is real, verified, from the same field, or shares surface keywords. A substantive connection between the user's core legal issue and the holding summary is required.
 - intro: one or two short Korean sentences, or an empty string. Do not include any case number or statute article number in intro.
 - intro는 자연스럽고 일관된 한국어 해요체(-해요/-이에요/-예요)로 작성하세요. 하십시오체(-습니다/-입니다), 반말, 보고서체를 섞지 마세요.
 
