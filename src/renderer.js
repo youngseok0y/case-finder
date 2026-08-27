@@ -92,7 +92,7 @@ function renderDirectMiss() {
 
 const STATE_HEADINGS = Object.freeze({
   SAFETY_REJECTED: "결과를 표시하지 않았습니다",
-  SEARCH_FAILED: "원문 검증에 실패했습니다",
+  SEARCH_FAILED: "검색 검증에 실패했습니다",
   NO_RESULT: "표시할 결과가 없습니다",
 });
 
@@ -132,7 +132,7 @@ export function renderResults(result = {}) {
   const caseHeading = [
     "관련 판례",
     items.length > 0 ? `<span class="section-count">${items.length}건</span>` : "",
-    allRelated ? `<span class="section-note">질문과 정확히 일치하는 판례는 없습니다</span>` : "",
+    allRelated ? `<span class="section-note">현재 검색 결과에서 질문과 직접 일치하는 판례는 확인되지 않았습니다</span>` : "",
   ].filter(Boolean).join("");
   const cases = items.length > 0
     ? items.map(renderCase).join("")
