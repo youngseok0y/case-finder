@@ -85,3 +85,24 @@ test("queries are searched only in their declared domains", async () => {
   assert.equal(result.length, 1);
   assert.equal(result[0].distinctQueryCount, 2);
 });
+
+test("all provider search errors are marked failed while definitive NOT_FOUND completes search", async () => {
+  const plan = {
+    queries: [{ query: "failure fixture", domain: "precedent", kind: "anchor" }],
+    law_names: [],
+  };
+  const failedTelemetry = {
+    executeTool: async () => ({ isError: true, content: [{ type: "text", text: "provider unavailable" }] }),
+  };
+  assert.deepEqual(await collectCandidates(plan, failedTelemetry), []);
+  assert.equal(failedTelemetry.searchDecisionQueries, 1);
+  assert.equal(failedTelemetry.searchDecisionFailures, 1);
+  assert.equal(failedTelemetry.searchFailed, true);
+
+  const notFoundTelemetry = {
+    executeTool: async () => ({ isError: true, content: [{ type: "text", text: "[NOT_FOUND]" }] }),
+  };
+  assert.deepEqual(await collectCandidates(plan, notFoundTelemetry), []);
+  assert.equal(notFoundTelemetry.searchDecisionFailures, 0);
+  assert.equal(notFoundTelemetry.searchFailed, false);
+});

@@ -52,6 +52,11 @@ function dateNumber(value) {
 }
 
 const QUERY_KIND_WEIGHT = Object.freeze({ anchor: 20, support: 10 });
+const SUPPORT_VALUES = Object.freeze(["direct", "related_only", "none"]);
+const RELATED_ONLY_INTRO = "질문과 직접 동일한 쟁점을 다룬 판례로 확인되지는 않았지만, 관련 법리를 참고할 수 있는 판례가 있습니다.";
+const NO_RESULT_WITH_LAWS_INTRO = "현재 검색 결과에서는 질문을 직접 뒷받침하는 판례를 확인하지 못했습니다. 관련 법령은 아래에서 확인할 수 있습니다.";
+const NO_RESULT_INTRO = "현재 검색 결과에서는 질문을 직접 뒷받침하는 판례를 확인하지 못했습니다.";
+const SEARCH_FAILURE_ERROR = "검색 제공자 오류";
 
 function queryEvidenceKey(entry) {
   return `${entry?.domain || ""}\u0000${entry?.query || ""}`;
@@ -182,6 +187,16 @@ export async function collectCandidates(plan, telemetry = null) {
   });
   const byCaseNumber = new Map();
   const queryStats = [];
+  const searchFailures = searchResults.filter((entry) => {
+    const rawText = entry.value?.result ? toolText(entry.value.result).trim() : "";
+    const definitiveNotFound = rawText === "[NOT_FOUND]";
+    return Boolean(entry.error || (entry.value?.result?.isError && !definitiveNotFound));
+  }).length;
+  if (telemetry) {
+    telemetry.searchDecisionQueries = jobs.length;
+    telemetry.searchDecisionFailures = searchFailures;
+    telemetry.searchFailed = jobs.length > 0 && searchFailures === jobs.length;
+  }
   for (const [queryIndex, entry] of searchResults.entries()) {
     const job = jobs[queryIndex];
     const rawText = entry.value?.result ? toolText(entry.value.result) : "";
@@ -326,6 +341,8 @@ function createDiagnosticTrace(query) {
     initial_ranked_before_candidate_max: [],
     preview_candidates: [],
     final_ranked_candidates: [],
+    raw_selection: null,
+    final_selection: null,
     selected: [],
   };
 }
@@ -421,6 +438,7 @@ function recordSelectionTrace(trace, selection, candidates) {
   const queryCounts = selectedCandidates.map(candidateQueryCount);
   const previewPresent = selectedCandidates.filter((candidate) => Boolean(String(candidate.preview || "").trim())).length;
   trace.raw_selection = {
+    support: SUPPORT_VALUES.includes(selection?.support) ? selection.support : null,
     raw_selected_count: selected.length,
     raw_direct_count: selected.filter((item) => item.match === "direct").length,
     raw_related_count: selected.filter((item) => item.match === "related").length,
@@ -537,15 +555,25 @@ export async function finalizeSelection({
   fallbackLabel,
   lawReferences,
   telemetry = null,
+  searchFailed = false,
 }) {
-  const safeSelection = selection || { selected: [], intro: "" };
-  const closedWorld = closedWorldSelections(safeSelection, candidatePool);
+  const safeSelection = selection && Array.isArray(selection.selected)
+    ? selection
+    : { selected: [], intro: "" };
+  const explicitSupport = SUPPORT_VALUES.includes(safeSelection.support) ? safeSelection.support : null;
+  const safeLawReferences = Array.isArray(lawReferences) ? lawReferences : [];
+  const closedWorld = explicitSupport === "none"
+    ? { selected: [], rejected: [] }
+    : closedWorldSelections(safeSelection, candidatePool);
   for (const rejectedCaseNumber of closedWorld.rejected) {
     await logValidation(query, rejectedCaseNumber, "Gemini 선별 결과가 후보 목록 밖이어서 제외했습니다.");
   }
   let selectedCandidates = closedWorld.selected;
-  if (selectedCandidates.length === 0) {
+  if (selectedCandidates.length === 0 && explicitSupport === null) {
     selectedCandidates = candidatesWithPreview.slice(0, Math.min(3, config.resultMax)).map((candidate) => ({ ...candidate, match: "related" }));
+  }
+  if (explicitSupport === "related_only") {
+    selectedCandidates = selectedCandidates.map((candidate) => ({ ...candidate, match: "related" }));
   }
 
   const detailResults = await mapWithConcurrency(selectedCandidates, config.searchConcurrency, async (candidate) => {
@@ -562,14 +590,34 @@ export async function finalizeSelection({
     }),
     match: selectedCandidates[index].match,
   }));
+  const verifiedItems = items.filter((item) => item.status === "verified");
+  const effectiveSupport = explicitSupport === null
+    ? null
+    : explicitSupport === "none"
+      ? "none"
+      : verifiedItems.some((item) => item.match === "direct")
+        ? "direct"
+        : verifiedItems.length > 0
+          ? "related_only"
+          : "none";
+  const intro = searchFailed
+    ? ""
+    : explicitSupport === null
+      ? safeSelection.intro
+      : effectiveSupport === "direct"
+        ? safeSelection.intro
+        : effectiveSupport === "related_only"
+          ? RELATED_ONLY_INTRO
+          : safeLawReferences.length > 0 ? NO_RESULT_WITH_LAWS_INTRO : NO_RESULT_INTRO;
 
   return {
     route: "natural",
     query,
-    intro: safeSelection.intro,
+    intro,
     fallbackLabel,
-    support: safeSelection.support || null,
-    lawReferences,
+    support: effectiveSupport,
+    error: searchFailed ? SEARCH_FAILURE_ERROR : "",
+    lawReferences: safeLawReferences,
     candidateCaseNumbers: candidatePool.map((candidate) => candidate.caseNumber),
     selected: selectedCandidates.map((candidate) => ({ caseNumber: candidate.caseNumber, match: candidate.match })),
     items,
@@ -619,6 +667,9 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     mcpCallsTotal: 0,
     mcpSearchCalls: 0,
     mcpDetailCalls: 0,
+    searchDecisionQueries: 0,
+    searchDecisionFailures: 0,
+    searchFailed: false,
     elapsedMs: 0,
     dTrace,
     diagnosticTrace,
@@ -689,6 +740,11 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     fallbackLabel = getFallbackLabel(error);
   }
   recordSelectionTrace(dTrace, selection, prepared.candidatesWithPreview);
+  if (diagnosticTrace) {
+    diagnosticTrace.raw_selection = {
+      support: SUPPORT_VALUES.includes(selection?.support) ? selection.support : null,
+    };
+  }
   reportProgress("FINALIZING", {
     candidateCount: prepared.candidatesWithPreview.length,
     lawCount: lawReferences.length,
@@ -701,6 +757,7 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     fallbackLabel,
     lawReferences,
     telemetry,
+    searchFailed: telemetry.searchFailed === true,
   });
   reportProgress("DETAIL_VERIFIED", {
     candidateCount: prepared.candidatesWithPreview.length,
@@ -710,6 +767,7 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
   if (dTrace) {
     const finalSelected = Array.isArray(finalResult.selected) ? finalResult.selected : [];
     dTrace.final_selection = {
+      support: finalResult.support || null,
       final_selected_count: finalSelected.length,
       final_direct_count: finalSelected.filter((item) => item.match === "direct").length,
       final_related_count: finalSelected.filter((item) => item.match === "related").length,
@@ -721,6 +779,9 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     dTrace.candidates.verified_candidate_count = dTrace.final_selection.selected_verified_count;
   }
   if (diagnosticTrace) {
+    diagnosticTrace.final_selection = {
+      support: finalResult.support || null,
+    };
     diagnosticTrace.selected = Array.isArray(finalResult.selected)
       ? finalResult.selected.map((item) => ({
         caseNumber: String(item?.caseNumber || item?.case_no || ""),
