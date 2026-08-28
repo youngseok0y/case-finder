@@ -180,6 +180,22 @@ await (async () => {
     }
   });
 
+  test("runtime inspection metadata is resolved once and shared by concurrent health checks", async () => {
+    let resolveCalls = 0;
+    const runtime = new CodexAppServerRuntime({
+      resolveRuntime: async () => {
+        resolveCalls += 1;
+        return { executablePath: "fake-codex", packageName: "fake", target: "fake", version: "0.147.0" };
+      },
+    });
+    const [first, second] = await Promise.all([runtime.inspect(), runtime.inspect()]);
+    assert.deepEqual(first, second);
+    assert.equal(resolveCalls, 1);
+    await runtime.inspect();
+    assert.equal(resolveCalls, 1);
+    await runtime.close();
+  });
+
   test("usage persistence failure does not poison the queue or invalidate a completed answer", async () => {
     const files = new Map();
     let failWrites = 1;
@@ -478,6 +494,36 @@ await (async () => {
     assert.equal(listeners.size, 0);
   });
 
+  test("account and rate-limit reads use a bounded cache until notification or expiry", async () => {
+    const listeners = new Set();
+    const calls = [];
+    let now = 1_000;
+    const runtime = {
+      onNotification(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async request(method) {
+        calls.push(method);
+        if (method === "account/read") return { account: { planType: "pro", type: "chatgpt" }, requiresOpenaiAuth: true };
+        if (method === "account/rateLimits/read") return { rateLimits: { primary: { usedPercent: 12, windowDurationMins: 10080 } } };
+        return {};
+      },
+    };
+    const manager = createCodexAccountManager({ runtime, cacheTtlMs: 100, now: () => now });
+    await manager.read();
+    await manager.read();
+    await manager.readRateLimits();
+    assert.equal(calls.filter((method) => method === "account/read").length, 1);
+    assert.equal(calls.filter((method) => method === "account/rateLimits/read").length, 1);
+
+    now += 101;
+    await manager.read();
+    assert.equal(calls.filter((method) => method === "account/read").length, 2);
+    assert.equal(calls.filter((method) => method === "account/rateLimits/read").length, 2);
+    manager.close();
+  });
+
   test("Codex quota normalization selects the preferred available window", () => {
     const reset = Date.parse("2026-08-28T06:20:00.000Z") / 1_000;
     const weekly = normalizeCodexQuota({
@@ -605,6 +651,7 @@ await (async () => {
     assert.equal(formatCodexQuotaWindowLabel(61), "61분");
     assert.equal(selectCodexQuotaWindow([]), null);
     assert.match(formatCodexResetLabel(reset), /2026년 8월 28일 오후 3:20/u);
+    assert.match(formatCodexResetLabel("2026-08-28T06:20:00.000Z"), /2026년 8월 28일 오후 3:20/u);
   });
 
   test("account notifications invalidate stale state and refresh account plus selected quota", async () => {

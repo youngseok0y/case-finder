@@ -1,8 +1,9 @@
 import { config } from "../config.js";
 import { callTool } from "./mcpClient.js";
 import { classifyLegalResult, LEGAL_RESULT_CATEGORIES } from "./legalResultClassifier.js";
-import { dedupeLawReferences } from "./lawReferences.js";
+import { dedupeLawReferences, lawReferenceIdentityKey } from "./lawReferences.js";
 import { caseNumberIncludes, normalizeCaseNumber } from "./router.js";
+import { text } from "./text.js";
 import {
   cleanText,
   decodeBasicHtml,
@@ -118,6 +119,10 @@ function rawToolText(result) {
   return typeof result?.rawText === "string" && result.rawText ? result.rawText : toolText(result);
 }
 
+function normalizedLawName(value) {
+  return text(value).replace(/\s+/gu, "").replace(/^대한민국헌법$/u, "헌법");
+}
+
 function cleanLawArticleText(rawText) {
   const text = cleanText(rawText);
   const articleStart = text.search(/(?:^|\n)\s*제\d+조(?:의\d+)?/);
@@ -152,55 +157,93 @@ export function parseStatuteReferences(referenceText) {
   return references;
 }
 
+function lawSearchCacheKey(lawName) {
+  return `law-search:${lawReferenceIdentityKey({ lawName, article: "" })}`;
+}
+
+function lawDetailCacheKey(candidate, article) {
+  const identity = candidate?.lawId ? `lawId:${candidate.lawId}` : `mst:${candidate?.mst || ""}`;
+  return `law-detail:${identity}:${article}`;
+}
+
+export async function findLawCandidate(lawName, execute, cache = new Map()) {
+  const key = lawSearchCacheKey(lawName);
+  if (cache.has(key)) return cache.get(key);
+  const promise = (async () => {
+    const searchResult = await execute("search_law", {
+      query: lawName,
+      display: 5,
+    });
+    const candidates = lawSearchItems(searchResult);
+    const searchCategory = classifyLegalResult(searchResult, {
+      toolName: "search_law",
+      rawText: rawToolText(searchResult),
+      parsedItems: candidates.length > 0,
+    });
+    if (searchCategory !== LEGAL_RESULT_CATEGORIES.SUCCESS) return null;
+    const target = normalizedLawName(lawName);
+    const candidate = candidates.find((item) => normalizedLawName(item.title) === target);
+    return candidate?.mst || candidate?.lawId ? candidate : null;
+  })();
+  cache.set(key, promise);
+  return promise;
+}
+
 export async function enrichLawReferences(referenceText, telemetry = null, executeTool = null, options = {}) {
   const references = parseStatuteReferences(referenceText).slice(0, config.lawMax);
-  const enriched = [];
+  const cache = options.lawReferenceCache instanceof Map ? options.lawReferenceCache : new Map();
   const execute = typeof executeTool === "function"
     ? executeTool
     : (name, args) => trackedCallTool(name, args, telemetry, options);
-  for (const reference of references) {
-    try {
-      if (options.signal?.aborted) throw abortedError();
-      const searchResult = await execute("search_law", {
-        query: reference.lawName,
-        display: 5,
-      });
-      const candidates = lawSearchItems(searchResult);
-      const searchCategory = classifyLegalResult(searchResult, {
-        toolName: "search_law",
-        rawText: rawToolText(searchResult),
-        parsedItems: candidates.length > 0,
-      });
-      if (searchCategory !== LEGAL_RESULT_CATEGORIES.SUCCESS) continue;
-      const candidateNames = [reference.lawName];
-      if (reference.lawName === "헌법") candidateNames.push("대한민국헌법");
-      const candidate = candidates.find((item) => candidateNames.some((name) => normalizeCaseNumber(item.title) === normalizeCaseNumber(name)));
-      if (!candidate?.mst && !candidate?.lawId) continue;
-      if (options.signal?.aborted) throw abortedError();
-      const lawResult = await execute("get_law_text", {
-        ...(candidate.lawId ? { lawId: candidate.lawId } : { mst: candidate.mst }),
-        jo: reference.article,
-      });
-      const rawLawText = lawResultText(lawResult);
-      const lawText = cleanLawArticleText(rawLawText);
-      const lawCategory = classifyLegalResult(lawResult, {
-        toolName: "get_law_text",
-        rawText: rawToolText(lawResult),
-      });
-      if (lawCategory !== LEGAL_RESULT_CATEGORIES.SUCCESS || !lawText) {
-        continue;
+  const resolveReference = (reference) => {
+    const key = lawReferenceIdentityKey(reference);
+    if (cache.has(key)) return cache.get(key);
+    const promise = (async () => {
+      try {
+        if (options.signal?.aborted) throw abortedError();
+        const candidate = await findLawCandidate(reference.lawName, execute, cache);
+        if (!candidate) return null;
+        if (options.signal?.aborted) throw abortedError();
+        const detailKey = lawDetailCacheKey(candidate, reference.article);
+        let detailPromise = cache.get(detailKey);
+        if (!detailPromise) {
+          detailPromise = (async () => {
+            const lawResult = await execute("get_law_text", {
+              ...(candidate.lawId ? { lawId: candidate.lawId } : { mst: candidate.mst }),
+              jo: reference.article,
+            });
+            const rawLawText = lawResultText(lawResult);
+            const lawText = cleanLawArticleText(rawLawText);
+            const lawCategory = classifyLegalResult(lawResult, {
+              toolName: "get_law_text",
+              rawText: rawToolText(lawResult),
+            });
+            return lawCategory === LEGAL_RESULT_CATEGORIES.SUCCESS && lawText ? { lawText } : null;
+          })();
+          cache.set(detailKey, detailPromise);
+        }
+        const detail = await detailPromise;
+        if (!detail) return null;
+        return {
+          ...reference,
+          text: detail.lawText,
+          link: lawDetailLink(candidate.mst, reference.article) || sanitizeApiLink(candidate.link, candidate.mst),
+        };
+      } catch (error) {
+        if (options.signal?.aborted || error?.code === "ABORTED" || error?.name === "AbortError") throw error;
+        return null;
       }
-      enriched.push({
-        ...reference,
-        text: lawText,
-        link: lawDetailLink(candidate.mst, reference.article) || sanitizeApiLink(candidate.link, candidate.mst),
-      });
-    } catch (error) {
-      if (options.signal?.aborted || error?.code === "ABORTED" || error?.name === "AbortError") throw error;
-      continue;
-    }
+    })();
+    cache.set(key, promise);
+    return promise;
+  };
+
+  const enriched = [];
+  for (let index = 0; index < references.length; index += 2) {
+    const batch = references.slice(index, index + 2);
+    enriched.push(...await Promise.all(batch.map(resolveReference)));
   }
-  return dedupeLawReferences(enriched);
+  return dedupeLawReferences(enriched.filter(Boolean));
 }
 
 export async function lookupDecisionCandidate(candidate, domain = "precedent", prefetched = null, telemetry = null, options = {}) {
@@ -284,7 +327,7 @@ async function lookupOne(caseRequest, callOptions = {}) {
 }
 
 export async function lookupDirect(query, route, { abortSignal = null } = {}) {
-  const options = { signal: abortSignal };
+  const options = { signal: abortSignal, lawReferenceCache: new Map() };
   const items = [];
   for (const caseRequest of route.cases) {
     items.push(await lookupOne(caseRequest, options));
@@ -293,7 +336,6 @@ export async function lookupDirect(query, route, { abortSignal = null } = {}) {
     route: "direct",
     query,
     requestedCaseNumbers: route.cases.map((item) => item.caseNumber),
-    ignoredCaseCount: route.ignoredCaseCount,
     items,
   };
 }

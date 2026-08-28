@@ -63,14 +63,14 @@ async function readBody(request) {
   }
   const chunks = [];
   let size = 0;
+  let tooLarge = false;
   for await (const chunk of request) {
-    size += chunk.length;
-    if (size > maxBodyBytes) {
-      request.resume();
-      throw new HttpRequestError(REQUEST_BODY_TOO_LARGE, 413, "Request body is too large.");
-    }
-    chunks.push(chunk);
+    const chunkSize = typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.byteLength ?? chunk.length;
+    size += chunkSize;
+    if (size > maxBodyBytes) tooLarge = true;
+    else if (!tooLarge) chunks.push(chunk);
   }
+  if (tooLarge) throw new HttpRequestError(REQUEST_BODY_TOO_LARGE, 413, "Request body is too large.");
   return Buffer.concat(chunks).toString("utf8");
 }
 
@@ -136,69 +136,87 @@ function codexQuotaHealthView(account) {
   };
 }
 
-async function quotaStatus({
-  codexAccountManagerImpl = getDefaultCodexAccountManager,
-  codexRuntimeImpl = getDefaultCodexAppServerRuntime,
-} = {}) {
-  let gemini;
+async function geminiQuotaStatus() {
   try {
     const usage = await readGeminiUsage();
     const usedPercent = Math.min(100, Math.max(0, Math.round((usage.callsToday / config.geminiRpdLimit) * 100)));
-    gemini = {
+    return {
       label: `${Math.max(0, 100 - usedPercent)}% 남음 · 로컬 추정`,
       source: "local_estimate",
       callsToday: usage.callsToday,
       dailyLimit: config.geminiRpdLimit,
     };
   } catch {
-    gemini = { label: "Gemini 사용량 확인 불가", source: "unavailable" };
+    return { label: "Gemini 사용량 확인 불가", source: "unavailable" };
   }
-  let codexQuota = { loggedIn: false, available: false, remainingPercent: null, windowKind: "unknown", windowLabel: "" };
+}
+
+async function codexQuotaStatus(codexAccountManagerImpl) {
   try {
-    codexQuota = codexQuotaHealthView(await codexAccountManagerImpl().read());
+    return codexQuotaHealthView(await codexAccountManagerImpl().read());
   } catch {
     // Health remains available when app-server account/quota is unavailable.
+    return { loggedIn: false, available: false, remainingPercent: null, windowKind: "unknown", windowLabel: "" };
   }
+}
+
+async function quotaStatus({
+  codexAccountManagerImpl = getDefaultCodexAccountManager,
+  codexRuntimeImpl = getDefaultCodexAppServerRuntime,
+} = {}) {
+  const [gemini, codexQuota] = await Promise.all([
+    geminiQuotaStatus(),
+    codexQuotaStatus(codexAccountManagerImpl),
+  ]);
   return {
     gemini,
     codexQuota,
   };
 }
 
-export async function healthPayload({
-  codexAccountManagerImpl = getDefaultCodexAccountManager,
-  codexRuntimeImpl = getDefaultCodexAppServerRuntime,
-} = {}) {
-  let luna = {
+function emptyLunaHealth() {
+  return {
     configured: false,
     codexAvailable: false,
     transport: "app_server",
     dynamicTools: false,
     version: "",
   };
-  if (config.searchAdapter === "luna_native") {
-    try {
-      const runtime = await codexRuntimeImpl().inspect();
-      luna = {
-        configured: true,
-        codexAvailable: runtime.available,
-        transport: runtime.transport,
-        dynamicTools: runtime.dynamicTools,
-        version: runtime.version,
-        package: runtime.packageName,
-        target: runtime.target,
-      };
-    } catch (error) {
-      luna = {
-        configured: true,
-        codexAvailable: false,
-        transport: "app_server",
-        dynamicTools: false,
-        version: "",
-        errorCode: error.code || "CODEX_APP_SERVER_RUNTIME_UNAVAILABLE",
-      };
-    }
+}
+
+async function lunaHealth(codexRuntimeImpl) {
+  if (config.searchAdapter !== "luna_native") return emptyLunaHealth();
+  try {
+    const runtime = await codexRuntimeImpl().inspect();
+    return {
+      configured: true,
+      codexAvailable: runtime.available,
+      transport: runtime.transport,
+      dynamicTools: runtime.dynamicTools,
+      version: runtime.version,
+      package: runtime.packageName,
+      target: runtime.target,
+    };
+  } catch (error) {
+    return {
+      configured: true,
+      codexAvailable: false,
+      transport: "app_server",
+      dynamicTools: false,
+      version: "",
+      errorCode: error.code || "CODEX_APP_SERVER_RUNTIME_UNAVAILABLE",
+    };
   }
+}
+
+export async function healthPayload({
+  codexAccountManagerImpl = getDefaultCodexAccountManager,
+  codexRuntimeImpl = getDefaultCodexAppServerRuntime,
+} = {}) {
+  const [luna, quota] = await Promise.all([
+    lunaHealth(codexRuntimeImpl),
+    quotaStatus({ codexAccountManagerImpl, codexRuntimeImpl }),
+  ]);
   return {
     service: PRODUCT_SERVICE,
     ok: true,
@@ -208,7 +226,7 @@ export async function healthPayload({
     mcp: getMcpStatus(),
     codex: { ...luna, transport: "app_server" },
     luna,
-    quota: await quotaStatus({ codexAccountManagerImpl, codexRuntimeImpl }),
+    quota,
   };
 }
 

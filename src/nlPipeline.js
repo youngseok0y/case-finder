@@ -5,9 +5,9 @@ import { classifyLegalResult, LEGAL_RESULT_CATEGORIES } from "./legalResultClass
 import {
   lookupDecisionCandidate,
   enrichLawReferences,
+  findLawCandidate,
   lawDetailLink,
   parseDecisionDetail,
-  parseLawSearchResults,
   parseStatuteReferences,
   parseDecisionSearchResults,
   sanitizeApiLink,
@@ -261,26 +261,12 @@ export async function collectCandidates(plan, telemetry = null) {
   return rawCandidates;
 }
 
-function normalizeLawName(value) {
-  return String(value || "").replace(/\s+/gu, "").replace(/^대한민국헌법$/u, "헌법");
-}
-
-async function searchRelatedLaws(plan, telemetry = null) {
-  const entries = await mapWithConcurrency(plan.law_names, config.searchConcurrency, async (lawName) => {
-    const result = await trackedCallTool("search_law", {
-      query: lawName,
-      display: config.lawSearchDisplay,
-    }, telemetry, { signal: telemetry?.abortSignal });
-    const rawText = toolText(result) || (typeof result?.rawText === "string" ? result.rawText : "");
-    const searchCategory = classifyLegalResult(result, {
-      toolName: "search_law",
-      rawText,
-      parsedItems: parseLawSearchResults(rawText).length > 0,
-    });
-    if (searchCategory !== LEGAL_RESULT_CATEGORIES.SUCCESS) return null;
-    const target = normalizeLawName(lawName);
-    const candidate = parseLawSearchResults(rawText).find(
-      (item) => normalizeLawName(item.title) === target,
+async function searchRelatedLaws(plan, telemetry = null, lawReferenceCache = new Map()) {
+  const entries = await mapWithConcurrency(plan.law_names, Math.min(2, config.searchConcurrency), async (lawName) => {
+    const candidate = await findLawCandidate(
+      lawName,
+      (name, args) => trackedCallTool(name, args, telemetry, { signal: telemetry?.abortSignal }),
+      lawReferenceCache,
     );
     if (!candidate || (!candidate.mst && !candidate.link)) return null;
     return {
@@ -295,9 +281,12 @@ async function searchRelatedLaws(plan, telemetry = null) {
     .map((entry) => entry.value));
 }
 
-export async function lookupQueryLawReferences(query, telemetry = null) {
+export async function lookupQueryLawReferences(query, telemetry = null, lawReferenceCache = new Map()) {
   if (parseStatuteReferences(query).length === 0) return [];
-  return enrichLawReferences(query, telemetry, null, { signal: telemetry?.abortSignal });
+  return enrichLawReferences(query, telemetry, null, {
+    signal: telemetry?.abortSignal,
+    lawReferenceCache,
+  });
 }
 
 function closedWorldSelections(selection, candidates) {
@@ -335,6 +324,7 @@ export async function finalizeSelection({
   lawReferences,
   telemetry = null,
   searchFailed = false,
+  lawReferenceCache = new Map(),
 }) {
   const safeSelection = selection && Array.isArray(selection.selected)
     ? selection
@@ -357,7 +347,10 @@ export async function finalizeSelection({
 
   const detailResults = await mapWithConcurrency(selectedCandidates, config.searchConcurrency, async (candidate) => {
     const prefetched = candidate.prefetched?.valid ? candidate.prefetched : null;
-    return lookupDecisionCandidate(candidate, candidate.domain, prefetched, telemetry, { signal: telemetry?.abortSignal });
+    return lookupDecisionCandidate(candidate, candidate.domain, prefetched, telemetry, {
+      signal: telemetry?.abortSignal,
+      lawReferenceCache,
+    });
   }, telemetry?.abortSignal);
   throwIfAborted(telemetry?.abortSignal);
   const items = detailResults.map((entry, index) => ({
@@ -452,6 +445,7 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
   const prepareCandidatesFn = dependencies.prepareCandidates || prepareCandidates;
   const selectCandidatesFn = dependencies.selectCandidates || pinnedRuntime.selectCandidates || selectCandidates;
   const finalizeSelectionFn = dependencies.finalizeSelection || finalizeSelection;
+  const lawReferenceCache = new Map();
   let plan;
   let fallbackLabel = "";
   try {
@@ -467,8 +461,8 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
 
   let [rawCandidates, planLawReferences, queryLawReferences] = await Promise.all([
     collectCandidatesFn(plan, telemetry),
-    searchRelatedLawsFn(plan, telemetry),
-    lookupQueryLawReferencesFn(query, telemetry),
+    searchRelatedLawsFn(plan, telemetry, lawReferenceCache),
+    lookupQueryLawReferencesFn(query, telemetry, lawReferenceCache),
   ]);
   throwIfAborted(abortSignal);
   const lawReferences = queryLawReferences.length > 0 ? queryLawReferences : planLawReferences;
@@ -506,6 +500,7 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     telemetry,
     searchFailed: telemetry.searchFailed === true,
     selectorOutcome: telemetry.selectorOutcome,
+    lawReferenceCache,
   });
   throwIfAborted(abortSignal);
   reportProgress("DETAIL_VERIFIED", {

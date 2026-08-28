@@ -90,6 +90,8 @@ export class CodexAppServerRuntime {
     this.sessions = new Map();
     this.notificationListeners = new Set();
     this.shuttingDown = false;
+    this.runtimeInspection = null;
+    this.inspectPromise = null;
   }
 
   async start() {
@@ -277,8 +279,18 @@ export class CodexAppServerRuntime {
   }
 
   async inspect() {
-    const runtime = await this.resolveRuntime();
-    return { ...appServerRuntimeStatus(runtime), executablePath: runtime.executablePath };
+    if (this.runtimeInspection) return { ...this.runtimeInspection };
+    if (!this.inspectPromise) {
+      this.inspectPromise = (async () => {
+        const runtime = await this.resolveRuntime();
+        const inspection = Object.freeze({ ...appServerRuntimeStatus(runtime), executablePath: runtime.executablePath });
+        this.runtimeInspection = inspection;
+        return inspection;
+      })().finally(() => {
+        this.inspectPromise = null;
+      });
+    }
+    return { ...(await this.inspectPromise) };
   }
 
   async close() {

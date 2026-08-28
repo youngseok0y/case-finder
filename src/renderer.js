@@ -135,8 +135,5 @@ export function renderResults(result = {}) {
   const lawSection = renderLawSection(lawReferences);
   const intro = result.intro ? `<p class="intro">${textBlock(result.intro)}</p>` : "";
   const fallback = result.fallbackLabel ? `<p class="notice">${escapeHtml(result.fallbackLabel)}</p>` : "";
-  const ignored = result.ignoredCaseCount > 0
-    ? `<p class="notice">사건번호는 최대 5개까지만 조회했습니다. 초과한 ${escapeHtml(result.ignoredCaseCount)}개는 무시했습니다.</p>`
-    : "";
-  return `<div class="case-finder-results" data-terminal-state="SUCCESS">${query}${intro}${fallback}${ignored}<section class="result-section"><h2>${caseHeading}</h2>${cases}</section>${lawSection}</div>`;
+  return `<div class="case-finder-results" data-terminal-state="SUCCESS">${query}${intro}${fallback}<section class="result-section"><h2>${caseHeading}</h2>${cases}</section>${lawSection}</div>`;
 }

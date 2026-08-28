@@ -133,7 +133,6 @@ export function routeQuery(query, maxCases = 5) {
   return {
     kind,
     cases: kind === "direct" ? matches.slice(0, maxCases) : [],
-    ignoredCaseCount: kind === "direct" ? Math.max(0, matches.length - maxCases) : 0,
     telemetry: routeTelemetry({ kind, reason, matches, relatedSearchIntent, exclusionIntent }),
   };
 }

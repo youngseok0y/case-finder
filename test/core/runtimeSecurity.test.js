@@ -20,7 +20,7 @@ await (async () => {
   const { withMcpTimeout } = await import("../../src/mcpClient.js");
   const { sanitizeLogValue } = await import("../../src/log.js");
   const { waitForHealth } = await import("../../src/verifyManagedRuntime.js");
-  const { createRequestHandler } = await import("../../src/server.js");
+  const { createGracefulShutdown, createRequestHandler } = await import("../../src/server.js");
   const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
   class FakeChild extends EventEmitter {
@@ -120,6 +120,68 @@ await (async () => {
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+
+  test("chunked oversized request returns a JSON 413 after draining the body", async () => {
+    const server = http.createServer(createRequestHandler());
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+    try {
+      const response = await new Promise((resolve, reject) => {
+        const request = http.request({
+          host: "127.0.0.1",
+          port,
+          path: "/ask",
+          method: "POST",
+          headers: {
+            host: `127.0.0.1:${port}`,
+            origin: `http://127.0.0.1:${port}`,
+            "content-type": "application/json",
+          },
+        }, (incoming) => {
+          const chunks = [];
+          incoming.on("data", (chunk) => chunks.push(chunk));
+          incoming.on("end", () => resolve({ statusCode: incoming.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+        });
+        request.on("error", reject);
+        request.write("x".repeat(6_000));
+        request.end("x".repeat(6_000));
+      });
+      assert.equal(response.statusCode, 413);
+      assert.deepEqual(JSON.parse(response.body), {
+        ok: false,
+        terminalState: "SEARCH_FAILED",
+        message: "Request body is too large.",
+      });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test("graceful shutdown is idempotent and bounds an active request", async () => {
+    let requestReceived;
+    const received = new Promise((resolve) => { requestReceived = resolve; });
+    const server = http.createServer(() => requestReceived());
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+    const request = http.request({ host: "127.0.0.1", port, path: "/hold" });
+    request.on("error", () => {});
+    request.end();
+    await received;
+
+    const closed = [];
+    const shutdown = createGracefulShutdown({
+      server,
+      graceMs: 20,
+      closeAccountManager: () => { closed.push("account"); },
+      closeRuntime: async () => { closed.push("runtime"); },
+      closeLegalMcp: async () => { closed.push("mcp"); },
+    });
+    const first = shutdown();
+    const second = shutdown();
+    assert.strictEqual(first, second);
+    await first;
+    assert.deepEqual(closed, ["account", "runtime", "mcp"]);
   });
 
   test("MCP timeout wrapper observes abort signals", async () => {
