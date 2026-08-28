@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
-import { generatePlan, runtimeName, selectCandidates } from "./geminiRuntime.js";
+import { generatePlan, generateRefinedPlan, runtimeName, selectCandidates } from "./geminiRuntime.js";
 import {
   lookupDecisionCandidate,
   enrichLawReferences,
@@ -170,7 +170,7 @@ export function getFallbackLabel(error) {
     : "AI 선별 없이 검색 결과만 표시합니다.";
 }
 
-export async function collectCandidates(plan, telemetry = null) {
+export async function collectCandidates(plan, telemetry = null, { existingCandidates = [], phase = "first" } = {}) {
   const jobs = plan.queries.map((entry) => ({
     query: entry.query,
     domain: entry.domain,
@@ -186,6 +186,15 @@ export async function collectCandidates(plan, telemetry = null) {
     return { ...job, result };
   });
   const byCaseNumber = new Map();
+  for (const candidate of Array.isArray(existingCandidates) ? existingCandidates : []) {
+    const caseNumber = normalizeCaseNumber(candidate?.caseNumber);
+    if (!caseNumber) continue;
+    byCaseNumber.set(caseNumberKey(caseNumber), {
+      ...candidate,
+      caseNumber,
+      matchedQueries: [...candidateMatchedQueries(candidate)],
+    });
+  }
   const queryStats = [];
   const searchFailures = searchResults.filter((entry) => {
     const rawText = entry.value?.result ? toolText(entry.value.result).trim() : "";
@@ -207,28 +216,27 @@ export async function collectCandidates(plan, telemetry = null) {
       .map((item) => normalizeCaseNumber(item.caseNumber))
       .filter(Boolean)
       .map(caseNumberKey));
-    if (telemetry?.dTrace && job) {
+    if (job) {
+      const resultCaseNumbers = parsedResults
+        .map((item) => normalizeCaseNumber(item.caseNumber) || String(item.caseNumber || "").trim())
+        .filter(Boolean);
       const queryStat = {
         query_index: queryIndex,
         query_hash: hashTraceValue(`${job.domain}\u0000${job.query}\u0000${job.kind}`),
+        query: job.query,
         domain: job.domain,
+        kind: job.kind,
         reported_total_results: null,
         exposed_result_count: parsedResults.length,
         unique_candidate_yield: uniqueQueryKeys.size,
         duplicate_candidate_yield: Math.max(0, parsedResults.length - uniqueQueryKeys.size),
         is_error: Boolean(entry.error || entry.value?.result?.isError),
+        result_case_numbers: resultCaseNumbers,
+        result_count: parsedResults.length,
       };
       queryStats.push(queryStat);
       if (telemetry.diagnosticTrace) {
-        telemetry.diagnosticTrace.search_queries.push({
-          ...queryStat,
-          query: job.query,
-          kind: job.kind,
-          result_case_numbers: parsedResults
-            .map((item) => normalizeCaseNumber(item.caseNumber) || String(item.caseNumber || "").trim())
-            .filter(Boolean),
-          result_count: parsedResults.length,
-        });
+        telemetry.diagnosticTrace.search_queries.push({ ...queryStat });
       }
     }
     if (entry.error || entry.value?.result?.isError) continue;
@@ -264,7 +272,18 @@ export async function collectCandidates(plan, telemetry = null) {
     }
   }
   const rawCandidates = [...byCaseNumber.values()];
-  if (telemetry?.dTrace) {
+  const refinementStats = queryStats.map((entry) => ({
+    query: entry.query,
+    domain: entry.domain,
+    kind: entry.kind,
+    result_count: entry.result_count,
+    is_error: entry.is_error,
+  }));
+  if (telemetry) {
+    if (phase === "second") telemetry.secondPassSearchStats = refinementStats;
+    else telemetry.firstPassSearchStats = refinementStats;
+  }
+  if (telemetry?.dTrace && phase === "first") {
     telemetry.dTrace.search_queries = queryStats;
     const resultCounts = queryStats.map((query) => query.exposed_result_count);
     const yields = queryStats.map((query) => query.unique_candidate_yield);
@@ -292,6 +311,17 @@ export async function collectCandidates(plan, telemetry = null) {
       : rawCandidates.filter((candidate) => candidateQueryCount(candidate) > 1).length / rawCandidates.length;
   }
   if (telemetry?.diagnosticTrace) {
+    if (phase === "second") {
+      telemetry.diagnosticTrace.second_pass ||= { triggered: true, queries: [] };
+      telemetry.diagnosticTrace.second_pass.queries.push(...queryStats.map((entry) => ({
+        query: entry.query,
+        domain: entry.domain,
+        kind: entry.kind,
+        result_case_numbers: [...entry.result_case_numbers],
+        result_count: entry.result_count,
+        is_error: entry.is_error,
+      })));
+    }
     telemetry.diagnosticTrace.raw_candidates = rawCandidates.map((candidate) => diagnosticCandidate(candidate));
   }
   return rawCandidates;
@@ -678,6 +708,8 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
   if (typeof dependencies.executeTool === "function") telemetry.executeTool = dependencies.executeTool;
   const generatePlanFn = dependencies.generatePlan || pinnedRuntime.generatePlan || generatePlan;
   const collectCandidatesFn = dependencies.collectCandidates || collectCandidates;
+  const generateRefinedPlanFn = dependencies.generateRefinedPlan || pinnedRuntime.generateRefinedPlan || generateRefinedPlan;
+  const forceRefinedPass = dependencies.forceRefinedPass === true || process.env.M6E_STAGE6_FORCE_REFINED === "1";
   const searchRelatedLawsFn = dependencies.searchRelatedLaws || searchRelatedLaws;
   const lookupQueryLawReferencesFn = dependencies.lookupQueryLawReferences || lookupQueryLawReferences;
   const prepareCandidatesFn = dependencies.prepareCandidates || prepareCandidates;
@@ -713,12 +745,25 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
   }
   reportProgress("ANALYSIS_COMPLETE");
 
-  const [rawCandidates, planLawReferences, queryLawReferences] = await Promise.all([
+  let [rawCandidates, planLawReferences, queryLawReferences] = await Promise.all([
     collectCandidatesFn(plan, telemetry),
     searchRelatedLawsFn(plan, telemetry),
     lookupQueryLawReferencesFn(query, telemetry),
   ]);
-  if (dTrace && dTrace.candidates.raw_candidate_count === null) {
+  if (forceRefinedPass) {
+    if (diagnosticTrace) diagnosticTrace.second_pass = { triggered: true, queries: [] };
+    try {
+      const refinedPlan = await generateRefinedPlanFn(query, telemetry.firstPassSearchStats || [], telemetry);
+      rawCandidates = await collectCandidatesFn(refinedPlan, telemetry, {
+        existingCandidates: rawCandidates,
+        phase: "second",
+      });
+    } catch {
+      // The forced experimental pass is non-fatal; keep first-pass candidates.
+      if (diagnosticTrace?.second_pass) diagnosticTrace.second_pass.refinement_error = true;
+    }
+  }
+  if (dTrace) {
     dTrace.candidates.raw_candidate_count = rawCandidates.length;
     dTrace.candidates.raw_summary = candidateSummary(rawCandidates);
   }

@@ -6,6 +6,7 @@ import { reserveGeminiCall } from "./rateLimiter.js";
 
 let client = null;
 let planPrompt = null;
+let refinePrompt = null;
 let selectPrompt = null;
 
 const PLAN_SCHEMA = {
@@ -31,6 +32,26 @@ const PLAN_SCHEMA = {
 };
 
 const SUPPORT_VALUES = Object.freeze(["direct", "related_only", "none"]);
+const REFINED_PLAN_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    queries: {
+      type: Type.ARRAY,
+      minItems: 2,
+      maxItems: 3,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          query: { type: Type.STRING },
+          domain: { type: Type.STRING, enum: ["constitutional"] },
+          kind: { type: Type.STRING, enum: ["anchor"] },
+        },
+        required: ["query", "domain", "kind"],
+      },
+    },
+  },
+  required: ["queries"],
+};
 
 function selectionSchema(caseNumbers) {
   const caseNumberSchema = { type: Type.STRING };
@@ -68,6 +89,10 @@ async function getPrompt(name) {
     planPrompt ||= await fs.readFile(path.join(ROOT_DIR, "prompts", "plan.txt"), "utf8");
     return planPrompt;
   }
+  if (name === "refine") {
+    refinePrompt ||= await fs.readFile(path.join(ROOT_DIR, "prompts", "refine-plan.txt"), "utf8");
+    return refinePrompt;
+  }
   selectPrompt ||= await fs.readFile(path.join(ROOT_DIR, "prompts", "select.txt"), "utf8");
   return selectPrompt;
 }
@@ -75,6 +100,7 @@ async function getPrompt(name) {
 function fillPrompt(prompt, values) {
   return prompt
     .replace("{{USER_QUERY}}", values.query)
+    .replace("{{FIRST_PASS}}", values.firstPass || "")
     .replace("{{CANDIDATES}}", values.candidates || "");
 }
 
@@ -111,6 +137,56 @@ export function validatePlan(plan) {
     throw new Error("Gemini 검색계획은 2개 이상의 anchor와 1개 이상의 support가 필요합니다.");
   }
   return { queries, law_names: lawNames };
+}
+
+function normalizeRefinementQuery(value) {
+  return String(value || "").replace(/\s+/gu, " ").trim().toLocaleLowerCase("ko-KR");
+}
+
+function containsCaseNumber(value) {
+  return /\d{2,4}\s*(?:헌가|헌나|헌다|헌라|헌마|헌바|헌사|헌아|헌자|헌카|헌타|헌파)\s*\d+/u.test(value)
+    || /\d{2,4}\s*[가-힣]{1,2}\s*\d{1,8}/u.test(value);
+}
+
+export function buildRefinementInput(query, firstPass = []) {
+  return {
+    user_query: query,
+    first_pass: (Array.isArray(firstPass) ? firstPass : []).map((entry) => ({
+      query: String(entry?.query || "").trim(),
+      domain: String(entry?.domain || "").trim(),
+      kind: String(entry?.kind || "").trim(),
+      result_count: Number.isInteger(entry?.result_count)
+        ? entry.result_count
+        : Number.isInteger(entry?.exposed_result_count) ? entry.exposed_result_count : 0,
+      is_error: Boolean(entry?.is_error),
+    })),
+  };
+}
+
+export function validateRefinedPlan(plan, firstPass = []) {
+  if (!plan || !Array.isArray(plan.queries)) {
+    throw new Error("Gemini refined 검색계획의 queries 형식이 올바르지 않습니다.");
+  }
+  const firstPassQueries = new Set(
+    (Array.isArray(firstPass) ? firstPass : [])
+      .map((entry) => normalizeRefinementQuery(entry?.query))
+      .filter(Boolean),
+  );
+  const seenQueries = new Set();
+  const queries = [];
+  for (const item of plan.queries) {
+    if (!item || typeof item.query !== "string") continue;
+    const query = item.query.trim();
+    const normalized = normalizeRefinementQuery(query);
+    if (!normalized || item.domain !== "constitutional" || item.kind !== "anchor") continue;
+    if (containsCaseNumber(query) || firstPassQueries.has(normalized) || seenQueries.has(normalized)) continue;
+    seenQueries.add(normalized);
+    queries.push({ query, domain: "constitutional", kind: "anchor" });
+  }
+  if (queries.length < 2) {
+    throw new Error("Gemini refined 검색계획은 중복을 제외하고 2개 이상의 constitutional anchor가 필요합니다.");
+  }
+  return { queries: queries.slice(0, 3), law_names: [] };
 }
 
 export function validateSelection(selection) {
@@ -195,6 +271,20 @@ export async function generatePlan(query, telemetry = null) {
     config: { responseMimeType: "application/json", responseSchema: PLAN_SCHEMA },
   }, { telemetry });
   return validatePlan(parseJsonResponse(response));
+}
+
+export async function generateRefinedPlan(query, firstPass, telemetry = null, options = {}) {
+  const generate = options.generateContent || generateContent;
+  const input = buildRefinementInput(query, firstPass);
+  const response = await generate({
+    model: config.geminiModel,
+    contents: fillPrompt(await getPrompt("refine"), {
+      query,
+      firstPass: JSON.stringify(input),
+    }),
+    config: { responseMimeType: "application/json", responseSchema: REFINED_PLAN_SCHEMA },
+  }, { telemetry });
+  return validateRefinedPlan(parseJsonResponse(response), input.first_pass);
 }
 
 export async function selectCandidates(query, candidates, telemetry = null) {
