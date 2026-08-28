@@ -9,7 +9,12 @@ await (async () => {
   createCommonEvidenceEnvelope,
 } = await import("../../src/aoV2/commonEvidenceEnvelope.js");
   const { createEvidenceLedger, parseProviderCompoundCaseNumber } = await import("../../src/aoV2/evidenceLedger.js");
-  const { parseCaseNumber } = await import("../../src/router.js");
+  const { expandCaseNumberSet, parseCaseNumber, routeQuery } = await import("../../src/router.js");
+  const {
+    canonicalCaseNumber,
+    expandCaseIdentitySet,
+    parseCaseIdentity,
+  } = await import("../../src/caseIdentity.js");
   const { createAgenticSearchV2 } = await import("../../src/aoV2/index.js");
   const { createLunaNativeAdapter } = await import("../../src/searchAdapters/lunaNativeAdapter.js");
   function replayDetail({ observedCaseNumber, returnedCaseNumber = observedCaseNumber, id = "fixture" }) {
@@ -92,6 +97,64 @@ await (async () => {
     });
     assert.equal(mismatch.result.verified, false);
     assert.equal(mismatch.ledger.snapshot().verificationFailures[0].code, "DETAIL_IDENTITY_MISMATCH");
+  });
+
+  test("canonical case identity stays independent from the router allowlist", () => {
+    assert.deepEqual(parseCaseIdentity("대법원 - ２０２４ - 다 - １２３４５"), {
+      year: "2024",
+      typeCode: "다",
+      serial: "12345",
+      caseNumber: "2024다12345",
+    });
+    assert.equal(canonicalCaseIdentity("99-두-2963"), "99두2963");
+    assert.equal(canonicalCaseIdentity("2027새12345"), "2027새12345");
+    assert.deepEqual([...expandCaseIdentitySet("2020므13562, 13579")], ["2020므13562", "2020므13579"]);
+    assert.equal(canonicalCaseNumber("2020므13562, 13579"), "2020므13562,2020므13579");
+    assert.deepEqual([...expandCaseNumberSet("2027 새 12345")], ["2027새12345"]);
+    assert.equal(parseCaseNumber("2027새12345"), null);
+    assert.equal(routeQuery("2027새12345").kind, "natural");
+  });
+
+  test("verified evidence remains monotonic after a failed detail re-fetch", () => {
+    const ledger = createEvidenceLedger({ provider: "monotonic-detail-fixture" });
+    ledger.recordDecisionSearch({
+      domain: "precedent",
+      query: "monotonic detail fixture",
+      items: [{ id: "stable-id", caseNumber: "2024다12345" }],
+    });
+    const initial = ledger.recordDecisionDetail({
+      domain: "precedent",
+      id: "stable-id",
+      caseNumber: "2024다12345",
+      detail: { caseNumber: "2024다12345", court: "대법원", sections: { 판결요지: "verified section" } },
+      rawText: "verified provider text",
+      verified: true,
+    });
+    const before = ledger.getCase("2024다12345");
+    const digest = before.detailDigest;
+
+    const retry = ledger.recordDecisionDetail({
+      domain: "precedent",
+      id: "stable-id",
+      caseNumber: "2024다12345",
+      detail: { caseNumber: "2024다12345", court: "untrusted replacement", sections: { 판결요지: "untrusted replacement" } },
+      rawText: "",
+      verified: false,
+    });
+    const after = ledger.getCase("2024다12345");
+
+    assert.equal(initial.verified, true);
+    assert.equal(retry.verified, true);
+    assert.equal(after.detailVerified, true);
+    assert.equal(after.evidenceState, "VERIFIED");
+    assert.equal(after.failureCode, "");
+    assert.equal(after.detailDigest, digest);
+    assert.equal(after.court, "대법원");
+    assert.equal(after.sections.판결요지, "verified section");
+    assert.equal(ledger.getDetailText("2024다12345"), "verified provider text");
+    assert.equal(after.verificationFailures.at(-1).code, "DETAIL_TEXT_MISSING");
+    assert.equal(ledger.snapshot().detailTraces.at(-1).verified, false);
+    assert.equal(ledger.snapshot().detailTraces.at(-1).verification_code, "DETAIL_TEXT_MISSING");
   });
 
   test("provider detail requires the observed provider ID provenance", () => {

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { normalizeCaseNumber } from "../router.js";
+import { normalizeCaseIdentityText } from "../caseIdentity.js";
 import {
   canonicalCaseIdentity,
   caseIdentityMatches,
@@ -16,7 +16,7 @@ function uniquePush(list, value) {
 }
 
 function caseNumberOf(value) {
-  return normalizeCaseNumber(text(value?.caseNumber || value?.case_no || value));
+  return normalizeCaseIdentityText(text(value?.caseNumber || value?.case_no || value));
 }
 
 function rawCaseNumberOf(value) {
@@ -24,11 +24,11 @@ function rawCaseNumberOf(value) {
 }
 
 function evidenceCaseKey(value) {
-  return canonicalCaseIdentity(value) || normalizeCaseNumber(value);
+  return canonicalCaseIdentity(value) || normalizeCaseIdentityText(value);
 }
 
 function evidenceKeyOf(provider, domain, identity) {
-  const normalizedIdentity = canonicalCaseIdentity(identity) || normalizeCaseNumber(identity) || text(identity);
+  const normalizedIdentity = canonicalCaseIdentity(identity) || normalizeCaseIdentityText(identity) || text(identity);
   return `${text(provider) || "unknown"}:${text(domain) || "unknown"}:${normalizedIdentity}`;
 }
 
@@ -268,22 +268,23 @@ export class EvidenceLedger {
       return { verified: false, reason: "SEARCH_NOT_OBSERVED" };
     }
 
-    candidate.detailOpened = true;
-    candidate.evidenceState = "DETAIL_OPENED";
-    candidate.failureCode = "";
-    candidate.court ||= text(detail.court);
-    candidate.date ||= text(detail.date);
-    candidate.sections = { ...candidate.sections, ...(detail.sections || {}) };
+    const wasDetailVerified = candidate.detailVerified;
     const parsed = parseProviderCompoundCaseNumber(rawDetailCaseNumber);
     const identityCompatibility = providerBoundCaseIdentityCompatibility(candidate.rawCaseNumber || candidate.caseNumber, rawDetailCaseNumber);
     const sameProviderProvenance = Boolean(requestedId && candidate.providerIds.includes(requestedId));
     const normalizedRawText = text(rawText);
-    candidate.detailVerified = Boolean(verified && sameProviderProvenance && identityCompatibility !== "mismatch" && normalizedRawText && !parsed.ambiguous);
-    if (candidate.detailVerified) {
-      if (candidate.evidenceKey) this.detailTexts.set(candidate.evidenceKey, normalizedRawText);
-      candidate.detailDigest = digestText(normalizedRawText);
+    const detailVerified = Boolean(verified && sameProviderProvenance && identityCompatibility !== "mismatch" && normalizedRawText && !parsed.ambiguous);
+    let attemptFailureCode = "";
+    candidate.detailOpened = true;
+    if (detailVerified) {
+      candidate.detailVerified = true;
       candidate.evidenceState = "VERIFIED";
       candidate.failureCode = "";
+      candidate.court ||= text(detail.court);
+      candidate.date ||= text(detail.date);
+      candidate.sections = { ...candidate.sections, ...(detail.sections || {}) };
+      if (candidate.evidenceKey) this.detailTexts.set(candidate.evidenceKey, normalizedRawText);
+      candidate.detailDigest = digestText(normalizedRawText);
       mergeProviderCaseEvidence(candidate, rawDetailCaseNumber);
     } else {
       const code = !sameProviderProvenance
@@ -293,6 +294,7 @@ export class EvidenceLedger {
           : !text(rawText)
             ? "DETAIL_TEXT_MISSING"
             : "DETAIL_CASE_NUMBER_AMBIGUOUS";
+      attemptFailureCode = code;
       const failure = {
         code,
         evidenceKey: candidate.evidenceKey,
@@ -300,8 +302,11 @@ export class EvidenceLedger {
         requestedCaseNumber: candidate.rawCaseNumber || candidate.caseNumber,
         detailCaseNumber: rawDetailCaseNumber,
       };
-      candidate.evidenceState = "REJECTED";
-      candidate.failureCode = code;
+      if (!wasDetailVerified) {
+        candidate.detailVerified = false;
+        candidate.evidenceState = "REJECTED";
+        candidate.failureCode = code;
+      }
       candidate.verificationFailures ||= [];
       const duplicate = candidate.verificationFailures.some((item) =>
         item.code === failure.code
@@ -325,12 +330,12 @@ export class EvidenceLedger {
       matched_provider_id: candidate.id || "",
       same_provider_provenance: sameProviderProvenance,
       identity_compatibility: identityCompatibility,
-      verified: candidate.detailVerified,
-      verification_code: candidate.detailVerified ? "" : candidate.verificationFailures?.at(-1)?.code || "DETAIL_NOT_VERIFIED",
+      verified: detailVerified,
+      verification_code: detailVerified ? "" : attemptFailureCode || "DETAIL_NOT_VERIFIED",
     });
     return {
       verified: candidate.detailVerified,
-      reason: candidate.detailVerified ? "" : "DETAIL_NOT_VERIFIED",
+      reason: detailVerified ? "" : "DETAIL_NOT_VERIFIED",
       caseNumber: candidate.caseNumber,
       evidenceKey: candidate.evidenceKey || "",
     };
@@ -532,7 +537,7 @@ export class EvidenceLedger {
       const claimType = text(claim?.claimType);
       const normalizedReference = claimType === "law"
         ? normalizeLawArticle(claim?.normalizedReference || claim?.article)
-        : normalizeCaseNumber(claim?.normalizedReference || claim?.caseNumber);
+        : normalizeCaseIdentityText(claim?.normalizedReference || claim?.caseNumber);
       if (!(["case", "law"].includes(claimType) && normalizedReference)) continue;
       const requestedStatus = text(claim?.status);
       let evidenceKey = text(claim?.evidenceKey);
