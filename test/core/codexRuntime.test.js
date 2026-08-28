@@ -25,6 +25,7 @@ await (async () => {
 } = await import("../../src/codexAccount.js");
   const { createLegalDynamicTools, LEGAL_TOOL_NAMES } = await import("../../src/aoV2/legalToolDefinitions.js");
   const { createCodexUsageCollector, normalizeCodexTokenUsage } = await import("../../src/codexUsage.js");
+  const { classifyCodexError, CODEX_ERROR_CATEGORIES } = await import("../../src/codexError.js");
   class FakeChild extends EventEmitter {
     constructor() {
       super();
@@ -377,6 +378,14 @@ await (async () => {
 
   test("missing AO gateway reports the deterministic required-gateway error", () => {
     assert.throws(() => createCodexNativeAo(), { message: "CODEX_NATIVE_AO_GATEWAY_REQUIRED" });
+  });
+
+  test("Codex error categories keep future app-server failures out of generic errors", () => {
+    assert.equal(classifyCodexError({ code: "CODEX_APP_SERVER_FUTURE_FAILURE" }), CODEX_ERROR_CATEGORIES.RUNTIME);
+    assert.equal(classifyCodexError({ code: "CODEX_APP_SERVER_PROTOCOL_FUTURE" }), CODEX_ERROR_CATEGORIES.PROTOCOL);
+    assert.equal(classifyCodexError({ code: "CODEX_AUTH_REQUIRED" }), CODEX_ERROR_CATEGORIES.AUTH);
+    assert.equal(classifyCodexError({ code: "CODEX_LOGIN_TYPE_UNSUPPORTED" }), CODEX_ERROR_CATEGORIES.INPUT);
+    assert.equal(classifyCodexError({ code: "SOME_UNRELATED_FAILURE" }), CODEX_ERROR_CATEGORIES.UNKNOWN);
   });
 
   test("dynamic legal tool schema is the four-tool product surface", () => {

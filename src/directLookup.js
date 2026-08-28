@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { callTool } from "./mcpClient.js";
+import { classifyLegalResult, LEGAL_RESULT_CATEGORIES } from "./legalResultClassifier.js";
 import { dedupeLawReferences } from "./lawReferences.js";
 import { caseNumberIncludes, normalizeCaseNumber } from "./router.js";
 import {
@@ -106,11 +107,15 @@ export function lawDetailLink(mst, article = "") {
 
 function lawSearchItems(result) {
   if (Array.isArray(result?.items)) return result.items;
-  return parseLawSearchResults(toolText(result));
+  return parseLawSearchResults(result?.rawText || toolText(result));
 }
 
 function lawResultText(result) {
   return cleanText(result?.rawText || toolText(result));
+}
+
+function rawToolText(result) {
+  return typeof result?.rawText === "string" && result.rawText ? result.rawText : toolText(result);
 }
 
 function cleanLawArticleText(rawText) {
@@ -161,6 +166,12 @@ export async function enrichLawReferences(referenceText, telemetry = null, execu
         display: 5,
       });
       const candidates = lawSearchItems(searchResult);
+      const searchCategory = classifyLegalResult(searchResult, {
+        toolName: "search_law",
+        rawText: rawToolText(searchResult),
+        parsedItems: candidates.length > 0,
+      });
+      if (searchCategory !== LEGAL_RESULT_CATEGORIES.SUCCESS) continue;
       const candidateNames = [reference.lawName];
       if (reference.lawName === "헌법") candidateNames.push("대한민국헌법");
       const candidate = candidates.find((item) => candidateNames.some((name) => normalizeCaseNumber(item.title) === normalizeCaseNumber(name)));
@@ -172,7 +183,11 @@ export async function enrichLawReferences(referenceText, telemetry = null, execu
       });
       const rawLawText = lawResultText(lawResult);
       const lawText = cleanLawArticleText(rawLawText);
-      if (lawResult?.isError || !lawText || rawLawText.includes("[NOT_FOUND]")) {
+      const lawCategory = classifyLegalResult(lawResult, {
+        toolName: "get_law_text",
+        rawText: rawToolText(lawResult),
+      });
+      if (lawCategory !== LEGAL_RESULT_CATEGORIES.SUCCESS || !lawText) {
         continue;
       }
       enriched.push({
@@ -194,11 +209,13 @@ export async function lookupDecisionCandidate(candidate, domain = "precedent", p
     id: candidate.id,
     full: false,
   }, telemetry, options);
-  const detailText = prefetched?.text || toolText(detailResult);
+  const detailText = prefetched?.text || rawToolText(detailResult);
   const detail = prefetched?.detail || parseDecisionDetail(detailText);
-  const detailValid = !detailResult?.isError
-    && !detailText.includes("[NOT_FOUND]")
-    && !detailText.includes("[HALLUCINATION_DETECTED]")
+  const detailCategory = classifyLegalResult(detailResult, {
+    toolName: "get_decision_text",
+    rawText: detailText,
+  });
+  const detailValid = detailCategory === LEGAL_RESULT_CATEGORIES.SUCCESS
     && caseNumberIncludes(detail.caseNumber, candidate.caseNumber);
 
   return {
@@ -225,12 +242,17 @@ async function lookupOne(caseRequest, callOptions = {}) {
     options: searchOptions,
     display: 100,
   }, callOptions);
-  const searchText = toolText(searchResult);
+  const searchText = rawToolText(searchResult);
   const candidates = parseDecisionSearchResults(searchText);
+  const searchCategory = classifyLegalResult(searchResult, {
+    toolName: "search_decisions",
+    rawText: searchText,
+    parsedItems: candidates.length > 0,
+  });
   const candidate = candidates.find(
     (item) => caseNumberIncludes(item.caseNumber, caseRequest.caseNumber),
   );
-  if (searchText.includes("[NOT_FOUND]")) {
+  if (searchCategory === LEGAL_RESULT_CATEGORIES.NOT_FOUND) {
     return {
       status: "not_found",
       caseNumber: caseRequest.caseNumber,
@@ -241,7 +263,7 @@ async function lookupOne(caseRequest, callOptions = {}) {
   // An upstream/API error is not evidence that the requested case does not
   // exist. Keep the result in the verification-failure path so the product
   // does not show a false direct-miss message.
-  if (searchResult.isError || !candidate) {
+  if (searchCategory !== LEGAL_RESULT_CATEGORIES.SUCCESS || !candidate) {
     return {
       status: "search_failed",
       caseNumber: caseRequest.caseNumber,

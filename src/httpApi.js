@@ -6,6 +6,8 @@ import { getMcpStatus } from "./mcpClient.js";
 import { logError } from "./log.js";
 import { getDefaultCodexAppServerRuntime } from "./codexAppServerRuntime.js";
 import { getDefaultCodexAccountManager } from "./codexAccount.js";
+import { classifyCodexError, CODEX_ERROR_CATEGORIES, codexErrorCode, isCodexUnavailable } from "./codexError.js";
+import { getSearchAdapterDefinition } from "./searchAdapters/catalog.js";
 import { adminSettingsView, validateAdminPatch, writeAdminSettings } from "./adminConfig.js";
 import {
   LUNA_APP_SERVER_RUNTIME_MESSAGE,
@@ -82,7 +84,7 @@ async function parseJsonBody(request) {
 }
 
 function adapterLabel(adapter) {
-  return adapter === "gemini_d" ? "Gemini 빠른 검색" : "Luna 고정밀 검색";
+  return getSearchAdapterDefinition(adapter)?.label || "확인 불가";
 }
 
 function finiteNumber(value) {
@@ -210,58 +212,42 @@ export async function healthPayload({
   };
 }
 
-function errorCode(error) {
-  return error?.code || String(error?.message || "").split(":", 1)[0];
-}
-
 function runtimeFailure(error) {
-  return config.searchAdapter === "luna_native" && [
-    "CODEX_APP_SERVER_RUNTIME_UNAVAILABLE",
-    "CODEX_APP_SERVER_PLATFORM_UNSUPPORTED",
-    "CODEX_APP_SERVER_SPAWN_FAILED",
-    "CODEX_APP_SERVER_INITIALIZE_FAILED",
-    "CODEX_APP_SERVER_PROCESS_FAILED",
-    "CODEX_APP_SERVER_PROCESS_CLOSED",
-    "CODEX_APP_SERVER_REQUEST_FAILED",
-    "CODEX_APP_SERVER_METHOD_UNSUPPORTED",
-    "CODEX_APP_SERVER_REQUEST_TIMEOUT",
-    "CODEX_APP_SERVER_THREAD_START_FAILED",
-    "CODEX_APP_SERVER_THREAD_ID_MISSING",
-    "CODEX_APP_SERVER_TURN_START_FAILED",
-    "CODEX_APP_SERVER_TURN_ID_MISSING",
-    "CODEX_APP_SERVER_TURN_FAILED",
-    "CODEX_APP_SERVER_TURN_TIMEOUT",
-    "CODEX_APP_SERVER_FINAL_INVALID",
-    "CODEX_APP_SERVER_TOOL_CALL_UNKNOWN",
-    "CODEX_APP_SERVER_PROTOCOL_CONTAMINATION",
-    "CODEX_NATIVE_SESSION_TIMEOUT",
-    "CODEX_NATIVE_SESSION_ENDED_WITHOUT_FINAL",
-    "CODEX_NATIVE_FINAL_MISSING",
-    "CODEX_NATIVE_PROCESS_FAILED",
-    "CODEX_AUTH_REQUIRED",
-  ].includes(errorCode(error));
+  const category = classifyCodexError(error);
+  const appServerInputFailure = category === CODEX_ERROR_CATEGORIES.INPUT
+    && codexErrorCode(error).startsWith("CODEX_APP_SERVER_");
+  return config.searchAdapter === "luna_native" && (isCodexUnavailable(error) || appServerInputFailure);
 }
 
 function errorPayload(error) {
-  const code = errorCode(error);
+  const code = codexErrorCode(error);
+  const category = classifyCodexError(error);
   if (runtimeFailure(error)) {
     const message = {
-      CODEX_AUTH_REQUIRED: LUNA_AUTH_REQUIRED_MESSAGE,
-    }[code] || (code.startsWith("CODEX_APP_SERVER_") ? LUNA_APP_SERVER_RUNTIME_MESSAGE : LUNA_RUNTIME_ERROR_MESSAGE);
+      [CODEX_ERROR_CATEGORIES.AUTH]: LUNA_AUTH_REQUIRED_MESSAGE,
+    }[category] || (code.startsWith("CODEX_APP_SERVER_") ? LUNA_APP_SERVER_RUNTIME_MESSAGE : LUNA_RUNTIME_ERROR_MESSAGE);
     return { status: 503, payload: { ok: false, terminalState: "LUNA_RUNTIME_UNAVAILABLE", message } };
   }
   return { status: 500, payload: { ok: false, terminalState: "NETWORK_SERVER_ERROR", message: "검색 처리 중 오류가 발생했습니다." } };
 }
 
 function codexApiErrorPayload(error) {
-  const code = errorCode(error);
-  if (code === "CODEX_LOGIN_TYPE_UNSUPPORTED") {
-    return { status: 400, payload: { ok: false, code, message: "지원하지 않는 Codex 로그인 방식입니다." } };
+  const code = codexErrorCode(error);
+  const category = classifyCodexError(error);
+  if (category === CODEX_ERROR_CATEGORIES.INPUT) {
+    return {
+      status: 400,
+      payload: {
+        ok: false,
+        code,
+        message: code === "CODEX_LOGIN_TYPE_UNSUPPORTED" ? "지원하지 않는 Codex 로그인 방식입니다." : "Codex 요청을 처리할 수 없습니다.",
+      },
+    };
   }
-  if (code === "CODEX_AUTH_REQUIRED") {
+  if (category === CODEX_ERROR_CATEGORIES.AUTH) {
     return { status: 503, payload: { ok: false, code, message: LUNA_AUTH_REQUIRED_MESSAGE } };
   }
-  if (String(code).startsWith("CODEX_")) {
+  if (category === CODEX_ERROR_CATEGORIES.RUNTIME || category === CODEX_ERROR_CATEGORIES.PROTOCOL) {
     return { status: 503, payload: { ok: false, code, message: LUNA_APP_SERVER_RUNTIME_MESSAGE } };
   }
   return { status: 500, payload: { ok: false, code: "CODEX_API_FAILED", message: "Codex 상태를 확인하지 못했습니다." } };

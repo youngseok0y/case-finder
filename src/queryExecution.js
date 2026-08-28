@@ -3,6 +3,7 @@ import { lookupDirect } from "./directLookup.js";
 import { renderResults } from "./renderer.js";
 import { routeQuery } from "./router.js";
 import { createProgressReporter } from "./progress.js";
+import { getSearchAdapterDefinition } from "./searchAdapters/catalog.js";
 import { defaultSearchAdapterRegistry } from "./searchAdapters/registry.js";
 import { assertResultContract } from "./searchAdapters/resultContract.js";
 import { validateDirectResult, validateNaturalResult } from "./validator.js";
@@ -60,11 +61,12 @@ export async function executeQuery(query, onProgress = () => {}, { abortSignal =
   });
   const validated = await validateNaturalResult(adapterResult);
   const publicResult = assertResultContract(validated);
+  const adapterDefinition = getSearchAdapterDefinition(config.searchAdapter);
   const response = responseForResult({
     query,
     route: "natural",
     result: publicResult,
-    stage: config.searchAdapter === "luna_native" ? "LUNA_NATIVE" : "GEMINI_D",
+    stage: adapterDefinition?.stage || "",
   });
   progress.emit("SEARCH_COMPLETE", {
     route: "natural",

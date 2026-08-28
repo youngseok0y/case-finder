@@ -270,6 +270,7 @@ await (async () => {
   const { createEvidenceLedger, parseProviderCompoundCaseNumber } = await import("../../src/aoV2/evidenceLedger.js");
   const { finalizeSelection } = await import("../../src/aoV2/finalSelectionGate.js");
   const { createLegalToolGateway, LEGAL_TOOL_NAMES } = await import("../../src/aoV2/legalToolGateway.js");
+  const { classifyLegalResult, LEGAL_RESULT_CATEGORIES } = await import("../../src/legalResultClassifier.js");
   const { caseNumberMatches } = await import("../../src/router.js");
   function verifiedLedger() {
     const ledger = createEvidenceLedger({ provider: "core-trust" });
@@ -336,10 +337,19 @@ await (async () => {
     const result = await gateway.execute("search_decisions", { domain: "precedent", query: "not found fixture" });
 
     assert.equal(result.isError, true);
+    assert.equal(result.category, LEGAL_RESULT_CATEGORIES.NOT_FOUND);
     assert.equal(result.notFound, true);
     assert.equal(result.hallucinationDetected, false);
     assert.equal(result.searchCompleted, true);
     assert.equal(ledger.snapshot().searchTraces.length, 1);
+  });
+
+  test("legal result categories distinguish success, sentinels, provider errors, and invalid payloads", () => {
+    assert.equal(classifyLegalResult({ items: [] }, { toolName: "search_decisions" }), LEGAL_RESULT_CATEGORIES.SUCCESS);
+    assert.equal(classifyLegalResult({ rawText: "[NOT_FOUND]" }, { toolName: "search_decisions" }), LEGAL_RESULT_CATEGORIES.NOT_FOUND);
+    assert.equal(classifyLegalResult({ isError: true, rawText: "[HALLUCINATION_DETECTED]" }, { toolName: "search_decisions" }), LEGAL_RESULT_CATEGORIES.HALLUCINATION);
+    assert.equal(classifyLegalResult({ isError: true, rawText: "provider unavailable" }, { toolName: "search_decisions" }), LEGAL_RESULT_CATEGORIES.PROVIDER_ERROR);
+    assert.equal(classifyLegalResult({}, { toolName: "search_decisions" }), LEGAL_RESULT_CATEGORIES.INVALID);
   });
 
   test("empty or structurally invalid search responses are not completed searches", async () => {
@@ -348,6 +358,7 @@ await (async () => {
         callTool: async () => raw,
       });
       const normalized = await gateway.execute("search_decisions", { domain: "precedent", query: "empty response" });
+      assert.equal(normalized.category, LEGAL_RESULT_CATEGORIES.INVALID);
       assert.equal(normalized.searchCompleted, false);
     }
   });

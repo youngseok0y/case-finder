@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
+import { isSupportedSearchAdapter, SEARCH_ADAPTER_CATALOG } from "./searchAdapters/catalog.js";
 
 export const ADMIN_SETTING_KEYS = Object.freeze([
   "SEARCH_ADAPTER",
@@ -30,7 +31,7 @@ function validateValue(key, rawValue) {
     if (!value) throw new Error(`ADMIN_SECRET_EMPTY:${key}`);
     return value;
   }
-  if (key === "SEARCH_ADAPTER" && !["gemini_d", "luna_native"].includes(value)) {
+  if (key === "SEARCH_ADAPTER" && !isSupportedSearchAdapter(value)) {
     throw new Error(`ADMIN_SETTING_INVALID:${key}`);
   }
   if (key === "CODEX_TIMEOUT_MS") {
@@ -91,10 +92,7 @@ export async function writeAdminSettings(values, envPath = config.runtimePaths.e
 export function adminSettingsView() {
   return {
     adapter: config.searchAdapter,
-    adapterOptions: [
-      { id: "gemini_d", label: "Gemini 빠른 검색" },
-      { id: "luna_native", label: "Luna 고정밀 검색" },
-    ],
+    adapterOptions: SEARCH_ADAPTER_CATALOG.map(({ id, label }) => ({ id, label })),
     configured: {
       geminiApiKey: Boolean(config.geminiApiKey),
       lawOc: Boolean(config.lawOc),

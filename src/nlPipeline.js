@@ -1,6 +1,7 @@
 import { config } from "../config.js";
 import { dedupeLawReferences } from "./lawReferences.js";
 import { generatePlan, runtimeName, selectCandidates } from "./geminiRuntime.js";
+import { classifyLegalResult, LEGAL_RESULT_CATEGORIES } from "./legalResultClassifier.js";
 import {
   lookupDecisionCandidate,
   enrichLawReferences,
@@ -153,11 +154,13 @@ async function previewCandidate(candidate, telemetry = null) {
       id: candidate.id,
       full: false,
     }, telemetry, { signal: telemetry?.abortSignal });
-    const text = toolText(result);
+    const text = toolText(result) || (typeof result?.rawText === "string" ? result.rawText : "");
     const detail = parseDecisionDetail(text);
-    const valid = !result.isError
-      && !text.includes("[NOT_FOUND]")
-      && !text.includes("[HALLUCINATION_DETECTED]")
+    const category = classifyLegalResult(result, {
+      toolName: "get_decision_text",
+      rawText: text,
+    });
+    const valid = category === LEGAL_RESULT_CATEGORIES.SUCCESS
       && caseNumberIncludes(detail.caseNumber, candidate.caseNumber);
     return {
       ...candidate,
@@ -196,26 +199,35 @@ export async function collectCandidates(plan, telemetry = null) {
     return { ...job, result };
   }, telemetry?.abortSignal);
   throwIfAborted(telemetry?.abortSignal);
+  const searchStates = searchResults.map((entry) => {
+    const result = entry.value?.result || {};
+    const rawText = result
+      ? toolText(result) || (typeof result.rawText === "string" ? result.rawText : "")
+      : "";
+    const parsedResults = rawText && !rawText.includes("[NOT_FOUND]")
+      ? parseDecisionSearchResults(rawText)
+      : [];
+    const category = entry.error
+      ? LEGAL_RESULT_CATEGORIES.PROVIDER_ERROR
+      : classifyLegalResult(result, {
+        toolName: "search_decisions",
+        rawText,
+        parsedItems: parsedResults.length > 0,
+      });
+    return { entry, rawText, parsedResults, category };
+  });
   const byCaseNumber = new Map();
-  const searchFailures = searchResults.filter((entry) => {
-    const rawText = entry.value?.result ? toolText(entry.value.result).trim() : "";
-    const definitiveNotFound = rawText === "[NOT_FOUND]";
-    return Boolean(entry.error || (entry.value?.result?.isError && !definitiveNotFound));
-  }).length;
+  const searchFailures = searchStates.filter(({ category }) => category !== LEGAL_RESULT_CATEGORIES.SUCCESS
+    && category !== LEGAL_RESULT_CATEGORIES.NOT_FOUND).length;
   if (telemetry) {
     telemetry.searchDecisionQueries = jobs.length;
     telemetry.searchDecisionFailures = searchFailures;
     telemetry.searchFailed = jobs.length > 0 && searchFailures === jobs.length;
   }
-  for (const [queryIndex, entry] of searchResults.entries()) {
+  for (const [queryIndex, state] of searchStates.entries()) {
+    const { entry, parsedResults, category } = state;
     const job = jobs[queryIndex];
-    const rawText = entry.value?.result ? toolText(entry.value.result) : "";
-    const parsedResults = rawText && !rawText.includes("[NOT_FOUND]")
-      ? parseDecisionSearchResults(rawText)
-      : [];
-    if (entry.error || entry.value?.result?.isError) continue;
-    const text = rawText;
-    if (!text || text.includes("[NOT_FOUND]")) continue;
+    if (category !== LEGAL_RESULT_CATEGORIES.SUCCESS) continue;
     for (const [providerIndex, item] of parsedResults.entries()) {
       const caseNumber = normalizeCaseNumber(item.caseNumber);
       if (!caseNumber) continue;
@@ -259,9 +271,15 @@ async function searchRelatedLaws(plan, telemetry = null) {
       query: lawName,
       display: config.lawSearchDisplay,
     }, telemetry, { signal: telemetry?.abortSignal });
-    if (result.isError) return null;
+    const rawText = toolText(result) || (typeof result?.rawText === "string" ? result.rawText : "");
+    const searchCategory = classifyLegalResult(result, {
+      toolName: "search_law",
+      rawText,
+      parsedItems: parseLawSearchResults(rawText).length > 0,
+    });
+    if (searchCategory !== LEGAL_RESULT_CATEGORIES.SUCCESS) return null;
     const target = normalizeLawName(lawName);
-    const candidate = parseLawSearchResults(toolText(result)).find(
+    const candidate = parseLawSearchResults(rawText).find(
       (item) => normalizeLawName(item.title) === target,
     );
     if (!candidate || (!candidate.mst && !candidate.link)) return null;

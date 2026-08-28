@@ -3,7 +3,7 @@ await (async () => {
   const assert = (await import("node:assert/strict")).default;
   const test = (await import("node:test")).default;
   const { config } = await import("../../config.js");
-  const { ADMIN_SETTING_KEYS, validateAdminPatch } = await import("../../src/adminConfig.js");
+  const { ADMIN_SETTING_KEYS, adminSettingsView, validateAdminPatch } = await import("../../src/adminConfig.js");
   const {
   createSearchAdapterRegistry,
   GEMINI_D_EXECUTION_PIN,
@@ -13,8 +13,15 @@ await (async () => {
   toResultContract,
 } = await import("../../src/searchAdapters/index.js");
   const { validateNaturalResult } = await import("../../src/validator.js");
+  const { SEARCH_ADAPTER_CATALOG, getSearchAdapterDefinition } = await import("../../src/searchAdapters/catalog.js");
   test("product adapter registry and search configuration are frozen", () => {
     assert.deepEqual(SEARCH_ADAPTER_IDS, ["gemini_d", "luna_native"]);
+    assert.deepEqual(SEARCH_ADAPTER_CATALOG.map(({ id, label, stage }) => ({ id, label, stage })), [
+      { id: "gemini_d", label: "Gemini 빠른 검색", stage: "GEMINI_D" },
+      { id: "luna_native", label: "Luna 고정밀 검색", stage: "LUNA_NATIVE" },
+    ]);
+    assert.deepEqual(adminSettingsView().adapterOptions, SEARCH_ADAPTER_CATALOG.map(({ id, label }) => ({ id, label })));
+    assert.equal(getSearchAdapterDefinition("luna_native").stage, "LUNA_NATIVE");
     assert.deepEqual(createSearchAdapterRegistry({ adapters: {
       gemini_d: { runNaturalQuery: async () => ({}) },
       luna_native: { runNaturalQuery: async () => ({}) },

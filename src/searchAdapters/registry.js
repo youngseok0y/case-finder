@@ -1,7 +1,8 @@
 import { createGeminiDAdapter } from "./geminiDAdapter.js";
 import { createLunaNativeAdapter } from "./lunaNativeAdapter.js";
+import { SEARCH_ADAPTER_CATALOG, SEARCH_ADAPTER_IDS } from "./catalog.js";
 
-export const SEARCH_ADAPTER_IDS = Object.freeze(["gemini_d", "luna_native"]);
+export { SEARCH_ADAPTER_CATALOG, SEARCH_ADAPTER_IDS } from "./catalog.js";
 
 export class SearchAdapterUnsupportedError extends Error {
   constructor(adapterId) {
@@ -13,10 +14,11 @@ export class SearchAdapterUnsupportedError extends Error {
 }
 
 export function createSearchAdapterRegistry({ adapters = {} } = {}) {
-  const entries = new Map([
-    ["gemini_d", createGeminiDAdapter()],
-    ["luna_native", createLunaNativeAdapter()],
-  ]);
+  const factories = {
+    gemini_d: createGeminiDAdapter,
+    luna_native: createLunaNativeAdapter,
+  };
+  const entries = new Map(SEARCH_ADAPTER_CATALOG.map(({ id }) => [id, factories[id]()]));
   for (const [id, adapter] of Object.entries(adapters)) {
     if (!SEARCH_ADAPTER_IDS.includes(id)) throw new SearchAdapterUnsupportedError(id);
     entries.set(id, adapter);

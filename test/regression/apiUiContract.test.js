@@ -122,6 +122,26 @@ await (async () => {
     assert.equal("email" in health, false);
     assert.equal("email" in health.quota.codexQuota, false);
   });
+
+  test("future Codex app-server errors use the unavailable runtime response", async () => {
+    const server = http.createServer(createRequestHandler({
+      codexAccountManagerImpl: () => ({
+        async read() {
+          throw Object.assign(new Error("future runtime"), { code: "CODEX_APP_SERVER_FUTURE_FAILURE" });
+        },
+      }),
+    }));
+    const port = await listen(server);
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/codex/account`);
+      const body = await response.json();
+      assert.equal(response.status, 503);
+      assert.equal(body.code, "CODEX_APP_SERVER_FUTURE_FAILURE");
+      assert.match(body.message, /app-server/iu);
+    } finally {
+      await close(server);
+    }
+  });
 })();
 
 // Consolidated from test/authWeeklyQuotaFallbackUx.test.js.
@@ -247,12 +267,14 @@ await (async () => {
       fs.readFile(path.join(ROOT, "public", "app.js"), "utf8"),
     ]);
     assert.match(adminHtml, /연결된 계정/u);
+    assert.doesNotMatch(adminHtml, /<option value="(?:gemini_d|luna_native)"/u);
     assert.match(adminHtml, /<dt>사용량<\/dt>/u);
     assert.doesNotMatch(adminHtml, /이번 주 사용량/u);
     assert.match(adminHtml, /다음 초기화/u);
     assert.doesNotMatch(adminHtml, /로컬 token usage/iu);
     assert.doesNotMatch(adminHtml, /rate limit/iu);
     assert.match(adminJs, /fetch\("\/api\/codex\/account"/u);
+    assert.match(adminJs, /payload\.adapterOptions/u);
     assert.match(adminJs, /quota\.resetLabel/u);
     assert.match(adminJs, /quota\.windowLabel/u);
     assert.match(adminJs, /window\.open\("", "codex-login"/u);
@@ -271,6 +293,8 @@ await (async () => {
     assert.match(appJs, /payload\.quota\?\.gemini\?\.label/u);
     assert.match(appJs, /usageTitle = "Codex 사용량"/u);
     assert.match(appJs, /payload\.quota\?\.codexQuota/u);
+    assert.match(appJs, /SEARCH_FAILED: "검색 검증에 실패했습니다"/u);
+    assert.doesNotMatch(appJs, /SEARCH_FAILED: "원문 검증에 실패했습니다"/u);
   });
 
   test("progress copy and search examples use the approved user-facing wording", async () => {

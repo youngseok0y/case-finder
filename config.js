@@ -2,6 +2,7 @@ import { config as loadDotenv } from "dotenv";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveRuntimePaths } from "./src/runtimePaths.js";
+import { isSupportedSearchAdapter } from "./src/searchAdapters/catalog.js";
 
 const currentFile = fileURLToPath(import.meta.url);
 const rootDir = path.dirname(currentFile);
@@ -11,7 +12,7 @@ if (process.env.CASE_FINDER_SKIP_DOTENV !== "1") {
 }
 
 const configuredSearchAdapter = process.env.SEARCH_ADAPTER || "luna_native";
-if (!new Set(["gemini_d", "luna_native"]).has(configuredSearchAdapter)) {
+if (!isSupportedSearchAdapter(configuredSearchAdapter)) {
   throw new Error(`PRODUCT_ADAPTER_UNSUPPORTED:${configuredSearchAdapter}`);
 }
 
