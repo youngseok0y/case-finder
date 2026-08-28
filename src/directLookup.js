@@ -22,7 +22,14 @@ export function recordMcpCall(telemetry, name) {
   if (name === "get_decision_text" || name === "get_law_text") telemetry.mcpDetailCalls = (telemetry.mcpDetailCalls || 0) + 1;
 }
 
+function abortedError() {
+  const error = new Error("MCP 호출이 취소되었습니다.");
+  error.code = "ABORTED";
+  return error;
+}
+
 export async function trackedCallTool(name, args, telemetry = null, options = {}) {
+  if (options.signal?.aborted) throw abortedError();
   recordMcpCall(telemetry, name);
   const executeTool = typeof telemetry?.executeTool === "function"
     ? telemetry.executeTool
@@ -137,6 +144,7 @@ export async function enrichLawReferences(referenceText, telemetry = null, execu
     : (name, args) => trackedCallTool(name, args, telemetry, options);
   for (const reference of references) {
     try {
+      if (options.signal?.aborted) throw abortedError();
       const searchResult = await execute("search_law", {
         query: reference.lawName,
         display: 5,
@@ -146,6 +154,7 @@ export async function enrichLawReferences(referenceText, telemetry = null, execu
       if (reference.lawName === "헌법") candidateNames.push("대한민국헌법");
       const candidate = candidates.find((item) => candidateNames.some((name) => normalizeCaseNumber(item.title) === normalizeCaseNumber(name)));
       if (!candidate?.mst && !candidate?.lawId) continue;
+      if (options.signal?.aborted) throw abortedError();
       const lawResult = await execute("get_law_text", {
         ...(candidate.lawId ? { lawId: candidate.lawId } : { mst: candidate.mst }),
         jo: reference.article,
@@ -160,7 +169,8 @@ export async function enrichLawReferences(referenceText, telemetry = null, execu
         text: lawText,
         link: lawDetailLink(candidate.mst, reference.article) || sanitizeApiLink(candidate.link, candidate.mst),
       });
-    } catch {
+    } catch (error) {
+      if (options.signal?.aborted || error?.code === "ABORTED" || error?.name === "AbortError") throw error;
       continue;
     }
   }

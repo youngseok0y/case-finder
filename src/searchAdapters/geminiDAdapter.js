@@ -22,6 +22,7 @@ function pinnedDependencies(options) {
     modelName: config.geminiModel,
     reasoningEffort: null,
     onProgress: options.onProgress,
+    abortSignal: options.abortSignal,
   };
 }
 

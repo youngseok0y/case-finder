@@ -13,6 +13,8 @@ await (async () => {
   createAppServerClient,
 } = await import("../../src/codexAppServerClient.js");
   const { createAgenticSearchV2 } = await import("../../src/aoV2/index.js");
+  const { createGeminiDAdapter } = await import("../../src/searchAdapters/geminiDAdapter.js");
+  const { runDeterministicPipeline } = await import("../../src/nlPipeline.js");
   const { withMcpTimeout } = await import("../../src/mcpClient.js");
   const { sanitizeLogValue } = await import("../../src/log.js");
   const { createRequestHandler } = await import("../../src/server.js");
@@ -122,6 +124,47 @@ await (async () => {
     const pending = withMcpTimeout(new Promise(() => {}), 1_000, controller.signal);
     controller.abort();
     await assert.rejects(pending, (error) => error.code === "ABORTED");
+  });
+
+  test("Gemini adapter abort stops the pipeline before later MCP work", async () => {
+    const controller = new AbortController();
+    let collectCalls = 0;
+    const adapter = createGeminiDAdapter({
+      run: (query, dependencies) => runDeterministicPipeline(query, {
+        ...dependencies,
+        generatePlan: async () => {
+          dependencies.onProgress("ANALYSIS_COMPLETE");
+          return {
+            queries: [
+              { query: "anchor one", domain: "precedent", kind: "anchor" },
+              { query: "anchor two", domain: "precedent", kind: "anchor" },
+              { query: "support one", domain: "precedent", kind: "support" },
+              { query: "support two", domain: "precedent", kind: "support" },
+            ],
+            law_names: [],
+          };
+        },
+        collectCandidates: async () => {
+          collectCalls += 1;
+          return [];
+        },
+        searchRelatedLaws: async () => [],
+        lookupQueryLawReferences: async () => [],
+        prepareCandidates: async () => ({ rankedCandidates: [], candidatesWithPreview: [] }),
+        selectCandidates: async () => ({ support: "none", selected: [], intro: "" }),
+      }),
+    });
+
+    await assert.rejects(
+      adapter.runNaturalQuery("abort fixture", {
+        abortSignal: controller.signal,
+        onProgress: (event) => {
+          if (event === "ANALYSIS_COMPLETE") controller.abort();
+        },
+      }),
+      (error) => error.code === "ABORTED",
+    );
+    assert.equal(collectCalls, 0);
   });
 
   test("error and validation log values redact credentials and tokens", () => {

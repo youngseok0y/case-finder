@@ -246,9 +246,17 @@ await (async () => {
       gatewayOptions: { callTool: async () => ({ items: [] }) },
       adapterOptions: { createSession: sessionFactory },
     });
-    const adapter = createLunaNativeAdapter({ createSearch: () => search });
-    await adapter.runNaturalQuery("공통 evidence fixture");
-    const envelope = search.lastRun?.envelope;
+    let context;
+    const contextAdapter = createLunaNativeAdapter({
+      createSearch: () => ({
+        async runWithContext(...args) {
+          context = await search.runWithContext(...args);
+          return context;
+        },
+      }),
+    });
+    await contextAdapter.runNaturalQuery("공통 evidence fixture");
+    const envelope = context?.envelope;
     assert.equal(typeof envelope?.state, "function");
     const keys = Object.keys(envelope.state()).sort();
     assert.deepEqual(keys, ["detail_attempts", "observed", "provenance", "rejected", "selectable", "verification_failures", "verified"]);

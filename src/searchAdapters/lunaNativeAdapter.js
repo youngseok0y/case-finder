@@ -166,7 +166,7 @@ export function createLunaNativeAdapter({
   if (!run && (!persistentSearch || typeof persistentSearch.runWithContext !== "function")) {
     throw new Error("LUNA_NATIVE_SEARCH_FACTORY_INVALID");
   }
-  async function selectedModel(options) {
+  async function selectedModel() {
     const manager = accountManager || (usesDefaultSearch ? getDefaultCodexAccountManager() : null);
     if (!manager || typeof manager.read !== "function") return selectCodexModel("unknown");
     try {
@@ -181,7 +181,7 @@ export function createLunaNativeAdapter({
     architecture: "AO_V2_NATIVE",
     executionPin: LUNA_NATIVE_EXECUTION_PIN,
     async runNaturalQuery(query, options = {}) {
-      const model = await selectedModel(options);
+      const model = await selectedModel();
       const runOptions = { ...options, model };
       const context = run
         ? { result: await run(query, { ...runOptions, provider: "codex_luna" }), ledger: null }

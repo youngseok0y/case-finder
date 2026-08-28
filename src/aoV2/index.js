@@ -37,7 +37,6 @@ export function createAgenticSearchV2({
   gatewayOptions = {},
   adapterOptions = {},
 } = {}) {
-  let lastRun = null;
   async function runWithContext(query, runOptions = {}) {
     const ledger = createEvidenceLedger({ provider });
     const telemetry = createTelemetry({
@@ -61,24 +60,13 @@ export function createAgenticSearchV2({
     if (provider !== "codex_luna") throw new Error(`AO_V2_PROVIDER_RETIRED:${provider}`);
     const adapter = createCodexNativeAo({ ...adapterOptions, gateway, ledger, telemetry, safety, envelope });
     const result = await adapter.run(query, runOptions);
-    const context = { result, ledger, envelope, telemetry, safety, gateway };
-    // This is retained for diagnostics/backward compatibility only. Product
-    // correctness must use the context returned by this invocation.
-    lastRun = context;
-    return context;
+    return { result, ledger, envelope, telemetry, safety, gateway };
   }
   return {
     provider,
-    get lastRun() {
-      return lastRun;
-    },
     runWithContext,
     async runAgenticSearchV2(query) {
       return (await runWithContext(query)).result;
     },
   };
-}
-
-export async function runAgenticSearchV2(query, options = {}) {
-  return createAgenticSearchV2(options).runAgenticSearchV2(query);
 }

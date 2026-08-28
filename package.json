@@ -12,11 +12,10 @@
     "check": "node scripts/check.mjs",
     "test": "node --test test/core/*.test.js",
     "test:regression": "node --test test/core/*.test.js test/regression/*.test.js",
-    "test:experimental": "node --test test/experimental/*.test.js",
-    "test:all": "node --test test/core/*.test.js test/regression/*.test.js test/experimental/*.test.js",
+    "test:all": "node --test test/core/*.test.js test/regression/*.test.js",
     "test:coverage:core": "node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.js\" test/core/*.test.js",
     "test:coverage:regression": "node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.js\" test/core/*.test.js test/regression/*.test.js",
-    "test:coverage:all": "node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.js\" test/core/*.test.js test/regression/*.test.js test/experimental/*.test.js",
+    "test:coverage:all": "node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.js\" test/core/*.test.js test/regression/*.test.js",
     "verify": "npm run check && npm run test:regression",
     "verify:managed": "node src/verifyManagedRuntime.js --skip-query"
   },

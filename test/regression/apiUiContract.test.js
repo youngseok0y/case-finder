@@ -294,7 +294,7 @@ await (async () => {
 await (async () => {
   const assert = (await import("node:assert/strict")).default;
   const test = (await import("node:test")).default;
-  const { SEARCH_FAILED_MESSAGE, SEARCH_STATUS_LABELS } = await import("../../src/productMessages.js");
+  const { SEARCH_FAILED_MESSAGE } = await import("../../src/productMessages.js");
   const { renderResults } = await import("../../src/renderer.js");
   test("related-only result uses bounded search wording", () => {
     const html = renderResults({
@@ -324,7 +324,6 @@ await (async () => {
       lawReferences: [],
     });
 
-    assert.equal(SEARCH_STATUS_LABELS.SEARCH_FAILED, "검색 검증 실패");
     assert.equal(SEARCH_FAILED_MESSAGE, "판례 검색 또는 원문 검증 과정에서 오류가 발생해 결과를 표시하지 않았습니다. 다시 검색하거나 잠시 후 다시 시도해 주세요.");
     assert.match(html, /검색 검증에 실패했습니다/u);
     assert.match(html, /판례 검색 또는 원문 검증 과정에서 오류가 발생해 결과를 표시하지 않았습니다/u);

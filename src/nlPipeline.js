@@ -1,8 +1,5 @@
-import crypto from "node:crypto";
-import fs from "node:fs/promises";
-import path from "node:path";
 import { config } from "../config.js";
-import { generatePlan, generateRefinedPlan, runtimeName, selectCandidates } from "./geminiRuntime.js";
+import { generatePlan, runtimeName, selectCandidates } from "./geminiRuntime.js";
 import {
   lookupDecisionCandidate,
   enrichLawReferences,
@@ -21,7 +18,7 @@ import { logValidation } from "./log.js";
 const modelName = config.geminiModel;
 const reasoningEffort = null;
 
-async function mapWithConcurrency(values, limit, callback) {
+async function mapWithConcurrency(values, limit, callback, abortSignal = null) {
   const results = new Array(values.length);
   let nextIndex = 0;
   async function worker() {
@@ -32,6 +29,7 @@ async function mapWithConcurrency(values, limit, callback) {
       try {
         results[index] = { value: await callback(values[index], index) };
       } catch (error) {
+        if (abortSignal?.aborted || error?.code === "ABORTED" || error?.name === "AbortError") throw error;
         results[index] = { error };
       }
     }
@@ -57,6 +55,16 @@ const RELATED_ONLY_INTRO = "질문과 직접 동일한 쟁점을 다룬 판례�
 const NO_RESULT_WITH_LAWS_INTRO = "현재 검색 결과에서는 질문을 직접 뒷받침하는 판례를 확인하지 못했습니다. 관련 법령은 아래에서 확인할 수 있습니다.";
 const NO_RESULT_INTRO = "현재 검색 결과에서는 질문을 직접 뒷받침하는 판례를 확인하지 못했습니다.";
 const SEARCH_FAILURE_ERROR = "검색 제공자 오류";
+
+function abortedError() {
+  const error = new Error("Gemini 검색이 취소되었습니다.");
+  error.code = "ABORTED";
+  return error;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw abortedError();
+}
 
 function queryEvidenceKey(entry) {
   return `${entry?.domain || ""}\u0000${entry?.query || ""}`;
@@ -143,7 +151,7 @@ async function previewCandidate(candidate, telemetry = null) {
       domain: candidate.domain,
       id: candidate.id,
       full: false,
-    }, telemetry);
+    }, telemetry, { signal: telemetry?.abortSignal });
     const text = toolText(result);
     const detail = parseDecisionDetail(text);
     const valid = !result.isError
@@ -156,6 +164,7 @@ async function previewCandidate(candidate, telemetry = null) {
       prefetched: { result, text, detail, valid },
     };
   } catch {
+    throwIfAborted(telemetry?.abortSignal);
     return { ...candidate, preview: "" };
   }
 }
@@ -165,12 +174,12 @@ export function fallbackPlan(query) {
 }
 
 export function getFallbackLabel(error) {
-  return error?.code === "GEMINI_LIMIT_EXCEEDED" && ["일일 한도", "분당 한도"].includes(error.reason)
+  return error?.code === "GEMINI_LIMIT_EXCEEDED" && error.reason === "일일 한도"
     ? "오늘의 AI 분석 한도에 도달했습니다. 결정론 검색 결과만 표시합니다."
     : "AI 선별 없이 검색 결과만 표시합니다.";
 }
 
-export async function collectCandidates(plan, telemetry = null, { existingCandidates = [], phase = "first" } = {}) {
+export async function collectCandidates(plan, telemetry = null) {
   const jobs = plan.queries.map((entry) => ({
     query: entry.query,
     domain: entry.domain,
@@ -182,20 +191,11 @@ export async function collectCandidates(plan, telemetry = null, { existingCandid
       query: job.query,
       display: config.searchDisplay,
       options: { search: 2 },
-    }, telemetry);
+    }, telemetry, { signal: telemetry?.abortSignal });
     return { ...job, result };
-  });
+  }, telemetry?.abortSignal);
+  throwIfAborted(telemetry?.abortSignal);
   const byCaseNumber = new Map();
-  for (const candidate of Array.isArray(existingCandidates) ? existingCandidates : []) {
-    const caseNumber = normalizeCaseNumber(candidate?.caseNumber);
-    if (!caseNumber) continue;
-    byCaseNumber.set(caseNumberKey(caseNumber), {
-      ...candidate,
-      caseNumber,
-      matchedQueries: [...candidateMatchedQueries(candidate)],
-    });
-  }
-  const queryStats = [];
   const searchFailures = searchResults.filter((entry) => {
     const rawText = entry.value?.result ? toolText(entry.value.result).trim() : "";
     const definitiveNotFound = rawText === "[NOT_FOUND]";
@@ -212,33 +212,6 @@ export async function collectCandidates(plan, telemetry = null, { existingCandid
     const parsedResults = rawText && !rawText.includes("[NOT_FOUND]")
       ? parseDecisionSearchResults(rawText)
       : [];
-    const uniqueQueryKeys = new Set(parsedResults
-      .map((item) => normalizeCaseNumber(item.caseNumber))
-      .filter(Boolean)
-      .map(caseNumberKey));
-    if (job) {
-      const resultCaseNumbers = parsedResults
-        .map((item) => normalizeCaseNumber(item.caseNumber) || String(item.caseNumber || "").trim())
-        .filter(Boolean);
-      const queryStat = {
-        query_index: queryIndex,
-        query_hash: hashTraceValue(`${job.domain}\u0000${job.query}\u0000${job.kind}`),
-        query: job.query,
-        domain: job.domain,
-        kind: job.kind,
-        reported_total_results: null,
-        exposed_result_count: parsedResults.length,
-        unique_candidate_yield: uniqueQueryKeys.size,
-        duplicate_candidate_yield: Math.max(0, parsedResults.length - uniqueQueryKeys.size),
-        is_error: Boolean(entry.error || entry.value?.result?.isError),
-        result_case_numbers: resultCaseNumbers,
-        result_count: parsedResults.length,
-      };
-      queryStats.push(queryStat);
-      if (telemetry.diagnosticTrace) {
-        telemetry.diagnosticTrace.search_queries.push({ ...queryStat });
-      }
-    }
     if (entry.error || entry.value?.result?.isError) continue;
     const text = rawText;
     if (!text || text.includes("[NOT_FOUND]")) continue;
@@ -272,58 +245,6 @@ export async function collectCandidates(plan, telemetry = null, { existingCandid
     }
   }
   const rawCandidates = [...byCaseNumber.values()];
-  const refinementStats = queryStats.map((entry) => ({
-    query: entry.query,
-    domain: entry.domain,
-    kind: entry.kind,
-    result_count: entry.result_count,
-    is_error: entry.is_error,
-  }));
-  if (telemetry) {
-    if (phase === "second") telemetry.secondPassSearchStats = refinementStats;
-    else telemetry.firstPassSearchStats = refinementStats;
-  }
-  if (telemetry?.dTrace && phase === "first") {
-    telemetry.dTrace.search_queries = queryStats;
-    const resultCounts = queryStats.map((query) => query.exposed_result_count);
-    const yields = queryStats.map((query) => query.unique_candidate_yield);
-    const nonzero = resultCounts.filter((value) => value > 0);
-    const highResultThreshold = config.searchDisplay;
-    const yieldMean = yields.length === 0 ? 0 : yields.reduce((sum, value) => sum + value, 0) / yields.length;
-    telemetry.dTrace.search_dispersion = {
-      zero_result_query_count: resultCounts.filter((value) => value === 0).length,
-      nonzero_result_query_count: nonzero.length,
-      high_result_query_count: resultCounts.filter((value) => value >= highResultThreshold).length,
-      high_result_threshold: highResultThreshold,
-      result_count: numericSummary(resultCounts),
-      unique_candidate_yield: numericSummary(yields),
-      candidate_yield_stddev: yields.length === 0
-        ? null
-        : Math.sqrt(yields.reduce((sum, value) => sum + ((value - yieldMean) ** 2), 0) / yields.length),
-    };
-    telemetry.dTrace.candidates.raw_summary = candidateSummary(rawCandidates);
-    telemetry.dTrace.candidates.raw_candidate_count = rawCandidates.length;
-    telemetry.dTrace.candidates.single_query_candidate_ratio = rawCandidates.length === 0
-      ? null
-      : rawCandidates.filter((candidate) => candidateQueryCount(candidate) === 1).length / rawCandidates.length;
-    telemetry.dTrace.candidates.multi_query_candidate_ratio = rawCandidates.length === 0
-      ? null
-      : rawCandidates.filter((candidate) => candidateQueryCount(candidate) > 1).length / rawCandidates.length;
-  }
-  if (telemetry?.diagnosticTrace) {
-    if (phase === "second") {
-      telemetry.diagnosticTrace.second_pass ||= { triggered: true, queries: [] };
-      telemetry.diagnosticTrace.second_pass.queries.push(...queryStats.map((entry) => ({
-        query: entry.query,
-        domain: entry.domain,
-        kind: entry.kind,
-        result_case_numbers: [...entry.result_case_numbers],
-        result_count: entry.result_count,
-        is_error: entry.is_error,
-      })));
-    }
-    telemetry.diagnosticTrace.raw_candidates = rawCandidates.map((candidate) => diagnosticCandidate(candidate));
-  }
   return rawCandidates;
 }
 
@@ -331,165 +252,12 @@ function normalizeLawName(value) {
   return String(value || "").replace(/\s+/gu, "").replace(/^대한민국헌법$/u, "헌법");
 }
 
-function hashTraceValue(value) {
-  return crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
-}
-
-function diagnosticCandidate(candidate, rank = null) {
-  const bestEvidence = candidateBestEvidence(candidate);
-  const item = {
-    caseNumber: String(candidate?.caseNumber || ""),
-    domain: String(candidate?.domain || ""),
-    matchedQueries: candidateMatchedQueries(candidate).map((entry) => ({
-      query: String(entry.query || ""),
-      domain: String(entry.domain || ""),
-      kind: String(entry.kind || ""),
-      providerRank: Number(entry.providerRank || 0),
-    })),
-    bestQueryKind: candidate.bestQueryKind || bestEvidence.kind || null,
-    bestProviderRank: candidate.bestProviderRank ?? bestEvidence.providerRank,
-    distinctQueryCount: candidateDistinctQueryCount(candidate),
-    court: String(candidate?.court || ""),
-    date: String(candidate?.date || ""),
-  };
-  if (rank !== null) item.rank = rank;
-  if (candidate?.id !== undefined && candidate?.id !== null) item.id = String(candidate.id);
-  if (Number.isFinite(candidate?.score)) item.score = candidate.score;
-  if (Number.isFinite(candidate?.recency)) item.recency = candidate.recency;
-  if (candidate?.preview !== undefined) item.preview_present = Boolean(String(candidate.preview || "").trim());
-  return item;
-}
-
-function createDiagnosticTrace(query) {
-  return {
-    schema_version: "m6e-d-diagnostic-v1",
-    query,
-    plan: { queries: [], law_names: [] },
-    search_queries: [],
-    raw_candidates: [],
-    initial_ranked_candidates: [],
-    initial_ranked_before_candidate_max: [],
-    preview_candidates: [],
-    final_ranked_candidates: [],
-    raw_selection: null,
-    final_selection: null,
-    selected: [],
-  };
-}
-
-async function appendDiagnosticTrace(tracePath, trace) {
-  try {
-    const resolvedPath = path.resolve(tracePath);
-    await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
-    await fs.appendFile(resolvedPath, `${JSON.stringify(trace)}\n`, "utf8");
-  } catch {
-    // Diagnostic output must never alter product search behavior.
-  }
-}
-
-function numericSummary(values) {
-  const finite = values.filter(Number.isFinite);
-  if (finite.length === 0) return { mean: null, median: null, min: null, max: null };
-  const sorted = [...finite].sort((left, right) => left - right);
-  const middle = (sorted.length - 1) / 2;
-  const lower = Math.floor(middle);
-  const upper = Math.ceil(middle);
-  return {
-    mean: finite.reduce((sum, value) => sum + value, 0) / finite.length,
-    median: lower === upper ? sorted[lower] : (sorted[lower] + sorted[upper]) / 2,
-    min: sorted[0],
-    max: sorted[sorted.length - 1],
-  };
-}
-function candidateQueryCount(candidate) {
-  return candidateDistinctQueryCount(candidate);
-}
-
-function candidateSummary(candidates) {
-  const queryCounts = candidates.map(candidateQueryCount);
-  return {
-    count: candidates.length,
-    distinct_queries: numericSummary(queryCounts),
-    preview_present_count: candidates.filter((candidate) => Boolean(String(candidate.preview || "").trim())).length,
-    preview_missing_count: candidates.filter((candidate) => !String(candidate.preview || "").trim()).length,
-  };
-}
-
-function rankingSummary(candidates) {
-  const scores = candidates.slice(0, 5).map((candidate) => Number(candidate.score)).filter(Number.isFinite);
-  const rank1 = scores[0] ?? null;
-  const rank2 = scores[1] ?? null;
-  const rank3 = scores[2] ?? null;
-  const rank12 = rank1 === null || rank2 === null ? null : rank1 - rank2;
-  const rank13 = rank1 === null || rank3 === null ? null : rank1 - rank3;
-  const mean = scores.length === 0 ? null : scores.reduce((sum, score) => sum + score, 0) / scores.length;
-  const variance = scores.length === 0 ? null : scores.reduce((sum, score) => sum + ((score - mean) ** 2), 0) / scores.length;
-  return {
-    rank1_score: rank1,
-    rank2_score: rank2,
-    rank3_score: rank3,
-    rank1_rank2_margin: rank12,
-    rank1_rank3_margin: rank13,
-    rank1_rank2_margin_ratio: rank12 === null || rank1 === 0 ? null : rank12 / Math.abs(rank1),
-    top5_score_mean: mean,
-    top5_score_stddev: variance === null ? null : Math.sqrt(variance),
-  };
-}
-
-function createDTrace() {
-  return {
-    schema_version: "m6e-d-trace-v1",
-    plan: null,
-    search_queries: [],
-    search_dispersion: null,
-    candidates: {
-      raw_candidate_count: null,
-      initial_ranked_candidate_count: null,
-      preview_candidate_count: null,
-      final_ranked_candidate_count: null,
-      verified_candidate_count: null,
-      raw_summary: null,
-      top5_summary: null,
-      raw_selected_summary: null,
-      ranking: null,
-    },
-    raw_selection: null,
-    final_selection: null,
-    validator: null,
-  };
-}
-
-function recordSelectionTrace(trace, selection, candidates) {
-  if (!trace) return;
-  const selected = Array.isArray(selection?.selected) ? selection.selected : [];
-  const selectedCandidates = selected
-    .map((item) => candidates.find((candidate) => caseNumberIncludes(candidate.caseNumber, item.case_no)))
-    .filter(Boolean);
-  const queryCounts = selectedCandidates.map(candidateQueryCount);
-  const previewPresent = selectedCandidates.filter((candidate) => Boolean(String(candidate.preview || "").trim())).length;
-  trace.raw_selection = {
-    support: SUPPORT_VALUES.includes(selection?.support) ? selection.support : null,
-    raw_selected_count: selected.length,
-    raw_direct_count: selected.filter((item) => item.match === "direct").length,
-    raw_related_count: selected.filter((item) => item.match === "related").length,
-    raw_direct_ratio: selected.length === 0 ? null : selected.filter((item) => item.match === "direct").length / selected.length,
-    raw_selection_empty: selected.length === 0,
-    raw_selected_case_key_hashes: selected
-      .map((item) => caseNumberKey(item.case_no))
-      .filter(Boolean)
-      .map(hashTraceValue),
-    raw_selected_distinct_queries: numericSummary(queryCounts),
-    raw_selected_preview_present_count: previewPresent,
-    raw_selected_preview_missing_count: selectedCandidates.length - previewPresent,
-  };
-}
-
 async function searchRelatedLaws(plan, telemetry = null) {
   const entries = await mapWithConcurrency(plan.law_names, config.searchConcurrency, async (lawName) => {
     const result = await trackedCallTool("search_law", {
       query: lawName,
       display: config.lawSearchDisplay,
-    }, telemetry);
+    }, telemetry, { signal: telemetry?.abortSignal });
     if (result.isError) return null;
     const target = normalizeLawName(lawName);
     const candidate = parseLawSearchResults(toolText(result)).find(
@@ -502,7 +270,7 @@ async function searchRelatedLaws(plan, telemetry = null) {
       text: "",
       link: sanitizeApiLink(candidate.link, candidate.mst) || lawDetailLink(candidate.mst),
     };
-  });
+  }, telemetry?.abortSignal);
   const seen = new Set();
   return entries
     .filter((entry) => !entry.error && entry.value)
@@ -517,7 +285,7 @@ async function searchRelatedLaws(plan, telemetry = null) {
 
 export async function lookupQueryLawReferences(query, telemetry = null) {
   if (parseStatuteReferences(query).length === 0) return [];
-  return enrichLawReferences(query, telemetry);
+  return enrichLawReferences(query, telemetry, null, { signal: telemetry?.abortSignal });
 }
 
 function closedWorldSelections(selection, candidates) {
@@ -538,42 +306,11 @@ function closedWorldSelections(selection, candidates) {
 }
 
 export async function prepareCandidates(candidates, telemetry = null) {
-  const diagnosticTrace = telemetry?.diagnosticTrace || null;
-  const initialRankedBeforeCandidateMax = diagnosticTrace
-    ? rankCandidates(candidates, { limit: false })
-    : null;
   const initialCandidates = rankCandidates(candidates);
-  if (diagnosticTrace) {
-    diagnosticTrace.initial_ranked_before_candidate_max = initialRankedBeforeCandidateMax.map((candidate, index) => diagnosticCandidate(candidate, index + 1));
-    diagnosticTrace.initial_ranked_candidates = initialCandidates.map((candidate, index) => diagnosticCandidate(candidate, index + 1));
-  }
-  if (telemetry?.dTrace) {
-    telemetry.dTrace.candidates.initial_ranked_candidate_count = initialCandidates.length;
-    telemetry.dTrace.candidates.top5_summary = candidateSummary(initialCandidates.slice(0, 5));
-    telemetry.dTrace.candidates.ranking = rankingSummary(initialCandidates);
-  }
-  const previewEntries = await mapWithConcurrency(initialCandidates, config.searchConcurrency, (candidate) => previewCandidate(candidate, telemetry));
+  const previewEntries = await mapWithConcurrency(initialCandidates, config.searchConcurrency, (candidate) => previewCandidate(candidate, telemetry), telemetry?.abortSignal);
+  throwIfAborted(telemetry?.abortSignal);
   const previewCandidates = previewEntries.filter((entry) => !entry.error).map((entry) => entry.value);
-  if (diagnosticTrace) {
-    diagnosticTrace.preview_candidates = previewCandidates.map((candidate, index) => diagnosticCandidate(candidate, index + 1));
-  }
-  if (telemetry?.dTrace) {
-    const top5Preview = previewEntries.slice(0, 5).filter((entry) => !entry.error).map((entry) => entry.value);
-    telemetry.dTrace.candidates.preview_candidate_count = previewCandidates.length;
-    telemetry.dTrace.candidates.top5_preview_present_count = top5Preview.filter((candidate) => Boolean(String(candidate.preview || "").trim())).length;
-    telemetry.dTrace.candidates.top5_preview_missing_count = top5Preview.length - telemetry.dTrace.candidates.top5_preview_present_count;
-    telemetry.dTrace.candidates.top5_preview_missing_ratio = top5Preview.length === 0
-      ? null
-      : telemetry.dTrace.candidates.top5_preview_missing_count / top5Preview.length;
-  }
   const rankedCandidates = rankCandidates(previewCandidates, { applyPreviewPenalty: true });
-  if (diagnosticTrace) {
-    diagnosticTrace.final_ranked_candidates = rankedCandidates.map((candidate, index) => diagnosticCandidate(candidate, index + 1));
-  }
-  if (telemetry?.dTrace) {
-    telemetry.dTrace.candidates.final_ranked_candidate_count = rankedCandidates.length;
-    telemetry.dTrace.candidates.ranking_after_preview_penalty = rankingSummary(rankedCandidates);
-  }
   return { rankedCandidates, candidatesWithPreview: rankedCandidates };
 }
 
@@ -608,8 +345,9 @@ export async function finalizeSelection({
 
   const detailResults = await mapWithConcurrency(selectedCandidates, config.searchConcurrency, async (candidate) => {
     const prefetched = candidate.prefetched?.valid ? candidate.prefetched : null;
-    return lookupDecisionCandidate(candidate, candidate.domain, prefetched, telemetry);
-  });
+    return lookupDecisionCandidate(candidate, candidate.domain, prefetched, telemetry, { signal: telemetry?.abortSignal });
+  }, telemetry?.abortSignal);
+  throwIfAborted(telemetry?.abortSignal);
   const items = detailResults.map((entry, index) => ({
     ...(entry.value || {
       status: "validation_failed",
@@ -665,16 +403,14 @@ export async function finalizeGeminiDResults(args) {
 export async function runDeterministicPipeline(query, dependencies = {}) {
   const startedAt = Date.now();
   const reportProgress = typeof dependencies.onProgress === "function" ? dependencies.onProgress : () => {};
+  const abortSignal = dependencies.abortSignal || null;
+  throwIfAborted(abortSignal);
   const pinnedRuntime = dependencies.runtime || {};
   const effectiveRuntimeName = dependencies.runtimeName || pinnedRuntime.runtimeName || runtimeName;
   const effectiveModelName = dependencies.modelName || pinnedRuntime.modelName || modelName;
   const effectiveReasoningEffort = dependencies.reasoningEffort === undefined
     ? (pinnedRuntime.reasoningEffort === undefined ? reasoningEffort : pinnedRuntime.reasoningEffort)
     : dependencies.reasoningEffort;
-  const traceEnabled = process.env.M6E_D_TRACE === "1";
-  const diagnosticTracePath = traceEnabled ? String(process.env.M6E_D_TRACE_PATH || "").trim() : "";
-  const dTrace = traceEnabled ? createDTrace() : null;
-  const diagnosticTrace = diagnosticTracePath ? createDiagnosticTrace(query) : null;
   const telemetry = {
     runtime: effectiveRuntimeName,
     model: effectiveModelName,
@@ -701,15 +437,12 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     searchDecisionFailures: 0,
     searchFailed: false,
     elapsedMs: 0,
-    dTrace,
-    diagnosticTrace,
-    diagnosticTracePath,
+    abortSignal,
+    selectorOutcome: "success",
   };
   if (typeof dependencies.executeTool === "function") telemetry.executeTool = dependencies.executeTool;
   const generatePlanFn = dependencies.generatePlan || pinnedRuntime.generatePlan || generatePlan;
   const collectCandidatesFn = dependencies.collectCandidates || collectCandidates;
-  const generateRefinedPlanFn = dependencies.generateRefinedPlan || pinnedRuntime.generateRefinedPlan || generateRefinedPlan;
-  const forceRefinedPass = dependencies.forceRefinedPass === true || process.env.M6E_STAGE6_FORCE_REFINED === "1";
   const searchRelatedLawsFn = dependencies.searchRelatedLaws || searchRelatedLaws;
   const lookupQueryLawReferencesFn = dependencies.lookupQueryLawReferences || lookupQueryLawReferences;
   const prepareCandidatesFn = dependencies.prepareCandidates || prepareCandidates;
@@ -722,51 +455,20 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
   try {
     plan = await generatePlanFn(query, telemetry);
   } catch (error) {
+    if (abortSignal?.aborted || error?.code === "ABORTED" || error?.name === "AbortError") throw error;
     plan = fallbackPlan(query);
     fallbackLabel = getFallbackLabel(error);
   }
-  if (dTrace) {
-    dTrace.plan = {
-      query_count: plan.queries.length,
-      anchor_query_count: plan.queries.filter((entry) => entry.kind === "anchor").length,
-      support_query_count: plan.queries.filter((entry) => entry.kind === "support").length,
-      law_name_count: plan.law_names.length,
-    };
-  }
-  if (diagnosticTrace) {
-    diagnosticTrace.plan = {
-      queries: Array.isArray(plan.queries) ? plan.queries.map((entry) => ({
-        query: entry.query,
-        domain: entry.domain,
-        kind: entry.kind,
-      })) : [],
-      law_names: Array.isArray(plan.law_names) ? [...plan.law_names] : [],
-    };
-  }
+  throwIfAborted(abortSignal);
   reportProgress("ANALYSIS_COMPLETE");
+  throwIfAborted(abortSignal);
 
   let [rawCandidates, planLawReferences, queryLawReferences] = await Promise.all([
     collectCandidatesFn(plan, telemetry),
     searchRelatedLawsFn(plan, telemetry),
     lookupQueryLawReferencesFn(query, telemetry),
   ]);
-  if (forceRefinedPass) {
-    if (diagnosticTrace) diagnosticTrace.second_pass = { triggered: true, queries: [] };
-    try {
-      const refinedPlan = await generateRefinedPlanFn(query, telemetry.firstPassSearchStats || [], telemetry);
-      rawCandidates = await collectCandidatesFn(refinedPlan, telemetry, {
-        existingCandidates: rawCandidates,
-        phase: "second",
-      });
-    } catch {
-      // The forced experimental pass is non-fatal; keep first-pass candidates.
-      if (diagnosticTrace?.second_pass) diagnosticTrace.second_pass.refinement_error = true;
-    }
-  }
-  if (dTrace) {
-    dTrace.candidates.raw_candidate_count = rawCandidates.length;
-    dTrace.candidates.raw_summary = candidateSummary(rawCandidates);
-  }
+  throwIfAborted(abortSignal);
   const lawReferences = queryLawReferences.length > 0 ? queryLawReferences : planLawReferences;
   reportProgress("LAW_EVIDENCE_UPDATED", {
     candidateCount: rawCandidates.length,
@@ -777,19 +479,17 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     lawCount: lawReferences.length,
   });
   const prepared = await prepareCandidatesFn(rawCandidates, telemetry);
+  throwIfAborted(abortSignal);
   let selection;
   try {
     selection = await selectCandidatesFn(query, prepared.candidatesWithPreview, telemetry);
   } catch (error) {
+    if (abortSignal?.aborted || error?.code === "ABORTED" || error?.name === "AbortError") throw error;
+    telemetry.selectorOutcome = "failed";
     selection = { selected: [], intro: "" };
     fallbackLabel = getFallbackLabel(error);
   }
-  recordSelectionTrace(dTrace, selection, prepared.candidatesWithPreview);
-  if (diagnosticTrace) {
-    diagnosticTrace.raw_selection = {
-      support: SUPPORT_VALUES.includes(selection?.support) ? selection.support : null,
-    };
-  }
+  throwIfAborted(abortSignal);
   reportProgress("FINALIZING", {
     candidateCount: prepared.candidatesWithPreview.length,
     lawCount: lawReferences.length,
@@ -803,38 +503,14 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     lawReferences,
     telemetry,
     searchFailed: telemetry.searchFailed === true,
+    selectorOutcome: telemetry.selectorOutcome,
   });
+  throwIfAborted(abortSignal);
   reportProgress("DETAIL_VERIFIED", {
     candidateCount: prepared.candidatesWithPreview.length,
     verifiedCount: (finalResult.items || []).filter((item) => item.status === "verified").length,
     lawCount: lawReferences.length,
   });
-  if (dTrace) {
-    const finalSelected = Array.isArray(finalResult.selected) ? finalResult.selected : [];
-    dTrace.final_selection = {
-      support: finalResult.support || null,
-      final_selected_count: finalSelected.length,
-      final_direct_count: finalSelected.filter((item) => item.match === "direct").length,
-      final_related_count: finalSelected.filter((item) => item.match === "related").length,
-      final_selected_case_key_hashes: finalSelected.map((item) => hashTraceValue(caseNumberKey(item.caseNumber))),
-      ranked_fill_applied: Boolean(dTrace.raw_selection?.raw_selection_empty && finalSelected.length > 0),
-      selected_verified_count: (finalResult.items || []).filter((item) => item.status === "verified").length,
-      selected_validation_failed_count: (finalResult.items || []).filter((item) => item.status !== "verified").length,
-    };
-    dTrace.candidates.verified_candidate_count = dTrace.final_selection.selected_verified_count;
-  }
-  if (diagnosticTrace) {
-    diagnosticTrace.final_selection = {
-      support: finalResult.support || null,
-    };
-    diagnosticTrace.selected = Array.isArray(finalResult.selected)
-      ? finalResult.selected.map((item) => ({
-        caseNumber: String(item?.caseNumber || item?.case_no || ""),
-        match: String(item?.match || ""),
-      })).filter((item) => item.caseNumber)
-      : [];
-    await appendDiagnosticTrace(diagnosticTracePath, diagnosticTrace);
-  }
   telemetry.elapsedMs = Date.now() - startedAt;
   return {
     ...finalResult,
@@ -864,6 +540,5 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
       stop_reason: fallbackLabel ? "FALLBACK_ERROR" : "MODEL_FINAL",
       fallback_used: Boolean(fallbackLabel),
     },
-    ...(dTrace ? { d_trace: dTrace } : {}),
   };
 }
