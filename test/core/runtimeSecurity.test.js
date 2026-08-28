@@ -2,7 +2,9 @@
 await (async () => {
   const assert = (await import("node:assert/strict")).default;
   const { EventEmitter } = await import("node:events");
+  const fs = await import("node:fs/promises");
   const http = (await import("node:http")).default;
+  const os = await import("node:os");
   const { PassThrough, Writable } = await import("node:stream");
   const { spawnSync } = await import("node:child_process");
   const test = (await import("node:test")).default;
@@ -17,6 +19,7 @@ await (async () => {
   const { runDeterministicPipeline } = await import("../../src/nlPipeline.js");
   const { withMcpTimeout } = await import("../../src/mcpClient.js");
   const { sanitizeLogValue } = await import("../../src/log.js");
+  const { waitForHealth } = await import("../../src/verifyManagedRuntime.js");
   const { createRequestHandler } = await import("../../src/server.js");
   const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -180,6 +183,62 @@ await (async () => {
     });
     assert.notEqual(result.status, 0);
     assert.match(`${result.stdout}\n${result.stderr}`, /missing required --stage/iu);
+  });
+
+  test("managed health retries a 200 response with invalid JSON", async () => {
+    let requestCount = 0;
+    const health = await waitForHealth(3311, { exitCode: null }, {
+      fetchImpl: async () => {
+        requestCount += 1;
+        return {
+          status: 200,
+          json: async () => {
+            if (requestCount === 1) throw new SyntaxError("invalid health JSON");
+            return { service: "case-finder", ok: true };
+          },
+        };
+      },
+      sleep: async () => {},
+    });
+    assert.deepEqual(health, { service: "case-finder", ok: true });
+    assert.equal(requestCount, 2);
+  });
+
+  test("packaging prune has only non-empty levels and fails closed for missing targets", async () => {
+    const source = await fs.readFile(path.join(ROOT, "packaging", "prune-staging.mjs"), "utf8");
+    assert.doesNotMatch(source, /\b\d+\s*:\s*\[\s*\]/u);
+
+    const stageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "case-finder-prune-"));
+    try {
+      const missing = spawnSync(process.execPath, [
+        path.join(ROOT, "packaging", "prune-staging.mjs"),
+        "--stage",
+        stageRoot,
+        "--level",
+        "1",
+      ], { cwd: ROOT, encoding: "utf8" });
+      assert.notEqual(missing.status, 0);
+      assert.match(`${missing.stdout}\n${missing.stderr}`, /expected prune target is missing/iu);
+
+      for (const relativePath of [
+        "node_modules/sharp",
+        "node_modules/@img/colour",
+        "node_modules/@img/sharp-win32-x64",
+      ]) {
+        await fs.mkdir(path.join(stageRoot, relativePath), { recursive: true });
+      }
+      const pruned = spawnSync(process.execPath, [
+        path.join(ROOT, "packaging", "prune-staging.mjs"),
+        "--stage",
+        stageRoot,
+        "--level",
+        "4",
+      ], { cwd: ROOT, encoding: "utf8" });
+      assert.equal(pruned.status, 0, `${pruned.stdout}\n${pruned.stderr}`);
+      assert.match(pruned.stdout, /"level": 4/iu);
+    } finally {
+      await fs.rm(stageRoot, { recursive: true, force: true });
+    }
   });
 })();
 
