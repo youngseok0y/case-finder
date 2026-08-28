@@ -1,4 +1,5 @@
 import { finalizeSelection } from "./finalSelectionGate.js";
+import { text } from "../text.js";
 import {
   canonicalCaseIdentity,
   canonicalCaseNumber,
@@ -17,10 +18,6 @@ export {
   expandCaseIdentitySet as expandProviderCaseNumberSet,
   parseCaseIdentity as parseProviderCaseNumber,
 };
-
-function text(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 export function evidenceProgressSnapshot(ledger) {
   if (typeof ledger?.progressSnapshot === "function") return ledger.progressSnapshot();

@@ -1,3 +1,4 @@
+import { dedupeLawReferences } from "./lawReferences.js";
 import {
   DIRECT_LOOKUP_MISS_PRIMARY,
   DIRECT_LOOKUP_MISS_SECONDARY,
@@ -53,21 +54,15 @@ function renderLawReference(reference) {
 }
 
 function renderLawSection(references) {
-  const laws = [];
-  const seenLaws = new Set();
-  for (const law of references || []) {
-    const key = `${law?.lawName || ""}|${law?.article || ""}|${law?.link || ""}`;
-    if (seenLaws.has(key)) continue;
-    seenLaws.add(key);
-    const rendered = renderLawReference(law);
-    if (rendered) laws.push(rendered);
-  }
+  const laws = dedupeLawReferences(references, {
+    isRenderable: (law) => Boolean(law?.lawName && safeHref(law.link, "/LSW/lsInfoP.do")),
+  }).map(renderLawReference);
   return laws.length > 0 ? `<section class="result-section"><h2>관련 법규<span class="section-count">${laws.length}건</span></h2><ul class="law-list">${laws.join("")}</ul></section>` : "";
 }
 
 function renderCase(item) {
   if (item?.status !== "verified") return "";
-  const href = safeHref(item.link, ["/LSW/precInfoP.do", "/LSW/detcInfoP.do"]);
+  const href = safeHref(item.link, ["/LSW/precInfoP.do", "/LSW/detcInfoP.do", "/LSW/deccInfoP.do"]);
   const caseNumber = escapeHtml(item.caseNumber || "사건번호 미상");
   const link = href
     ? `<a class="case-number" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${caseNumber}</a>`

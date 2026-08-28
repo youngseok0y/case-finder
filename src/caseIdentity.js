@@ -1,9 +1,7 @@
+import { text } from "./text.js";
+
 const CASE_IDENTITY_PATTERN = /(?<!\d)((?:19|20)\d{2}|\d{2})([가-힣]{1,4})(\d{1,7})$/u;
 const CASE_IDENTITY_SEPARATOR = /[\s\u002D\u2010-\u2015\u2212]+/gu;
-
-function text(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 export function normalizeCaseIdentityText(value) {
   return text(value).normalize("NFKC").replace(CASE_IDENTITY_SEPARATOR, "").trim();

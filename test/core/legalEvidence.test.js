@@ -54,6 +54,7 @@ await (async () => {
   const assert = (await import("node:assert/strict")).default;
   const test = (await import("node:test")).default;
   const { articleToJoNo, enrichLawReferences, lawDetailLink, parseStatuteReferences } = await import("../../src/directLookup.js");
+  const { dedupeLawReferences } = await import("../../src/lawReferences.js");
   const { renderResults } = await import("../../src/renderer.js");
   function pairs(value) {
     return parseStatuteReferences(value).map(({ lawName, article }) => [lawName, article]);
@@ -162,6 +163,29 @@ await (async () => {
       return { isError: true, rawText: "provider error" };
     });
     assert.deepEqual(errored, []);
+  });
+
+  test("canonical law references normalize identity and retain only renderable links", () => {
+    const references = dedupeLawReferences([
+      { lawName: " 민법 ", article: " 제750조 ", link: " https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=1 " },
+      { lawName: "민법", article: "제750조", link: "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=1" },
+      { lawName: "대한민국헌법", article: "제10조", link: "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=2" },
+      { lawName: "헌법", article: "제10조", link: "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=2" },
+      { lawName: "민법", article: "제751조", link: "" },
+      { lawName: "", article: "제750조", link: "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=1" },
+    ]);
+    assert.deepEqual(references.map(({ lawName, article, link }) => ({ lawName, article, link })), [
+      {
+        lawName: "민법",
+        article: "제750조",
+        link: "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=1",
+      },
+      {
+        lawName: "대한민국헌법",
+        article: "제10조",
+        link: "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=2",
+      },
+    ]);
   });
 
   test("renderer preserves law article deeplink query parameters and opens it in a new tab", () => {

@@ -1,4 +1,5 @@
 import { config } from "../config.js";
+import { dedupeLawReferences } from "./lawReferences.js";
 import { generatePlan, runtimeName, selectCandidates } from "./geminiRuntime.js";
 import {
   lookupDecisionCandidate,
@@ -271,16 +272,9 @@ async function searchRelatedLaws(plan, telemetry = null) {
       link: sanitizeApiLink(candidate.link, candidate.mst) || lawDetailLink(candidate.mst),
     };
   }, telemetry?.abortSignal);
-  const seen = new Set();
-  return entries
+  return dedupeLawReferences(entries
     .filter((entry) => !entry.error && entry.value)
-    .map((entry) => entry.value)
-    .filter((reference) => {
-      const key = normalizeLawName(reference.lawName);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    .map((entry) => entry.value));
 }
 
 export async function lookupQueryLawReferences(query, telemetry = null) {
@@ -311,7 +305,7 @@ export async function prepareCandidates(candidates, telemetry = null) {
   throwIfAborted(telemetry?.abortSignal);
   const previewCandidates = previewEntries.filter((entry) => !entry.error).map((entry) => entry.value);
   const rankedCandidates = rankCandidates(previewCandidates, { applyPreviewPenalty: true });
-  return { rankedCandidates, candidatesWithPreview: rankedCandidates };
+  return { candidatesWithPreview: rankedCandidates };
 }
 
 export async function finalizeSelection({
@@ -392,14 +386,6 @@ export async function finalizeSelection({
   };
 }
 
-/**
- * Finalizes Gemini D candidates through the closed-world/detail lookup path.
- * Luna Native uses the separate EvidenceLedger/FinalSelectionGate path.
- */
-export async function finalizeGeminiDResults(args) {
-  return finalizeSelection(args);
-}
-
 export async function runDeterministicPipeline(query, dependencies = {}) {
   const startedAt = Date.now();
   const reportProgress = typeof dependencies.onProgress === "function" ? dependencies.onProgress : () => {};
@@ -447,9 +433,7 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
   const lookupQueryLawReferencesFn = dependencies.lookupQueryLawReferences || lookupQueryLawReferences;
   const prepareCandidatesFn = dependencies.prepareCandidates || prepareCandidates;
   const selectCandidatesFn = dependencies.selectCandidates || pinnedRuntime.selectCandidates || selectCandidates;
-  const finalizeGeminiDResultsFn = dependencies.finalizeGeminiDResults
-    || dependencies.finalizeSelection
-    || finalizeGeminiDResults;
+  const finalizeSelectionFn = dependencies.finalizeSelection || finalizeSelection;
   let plan;
   let fallbackLabel = "";
   try {
@@ -494,10 +478,10 @@ export async function runDeterministicPipeline(query, dependencies = {}) {
     candidateCount: prepared.candidatesWithPreview.length,
     lawCount: lawReferences.length,
   });
-  const finalResult = await finalizeGeminiDResultsFn({
+  const finalResult = await finalizeSelectionFn({
     query,
     candidatesWithPreview: prepared.candidatesWithPreview,
-    candidatePool: prepared.rankedCandidates,
+    candidatePool: prepared.candidatesWithPreview,
     selection,
     fallbackLabel,
     lawReferences,

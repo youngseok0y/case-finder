@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { callTool } from "./mcpClient.js";
+import { dedupeLawReferences } from "./lawReferences.js";
 import { caseNumberIncludes, normalizeCaseNumber } from "./router.js";
 import {
   cleanText,
@@ -52,6 +53,10 @@ export function sanitizeApiLink(rawLink, fallbackId = "") {
       const id = link.searchParams.get("ID") || fallbackId;
       if (id) return `https://www.law.go.kr/LSW/detcInfoP.do?detcSeq=${encodeURIComponent(id)}`;
     }
+    if (link.pathname.toLowerCase() === "/drf/lawservice.do" && link.searchParams.get("target") === "decc") {
+      const id = link.searchParams.get("ID") || fallbackId;
+      if (id) return `https://www.law.go.kr/LSW/deccInfoP.do?deccSeq=${encodeURIComponent(id)}`;
+    }
     if (link.pathname.toLowerCase() === "/drf/lawservice.do" && link.searchParams.get("target") === "law") {
       const mst = link.searchParams.get("MST") || fallbackId;
       if (/^\d+$/.test(mst)) return `https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=${encodeURIComponent(mst)}`;
@@ -66,9 +71,15 @@ export function sanitizeApiLink(rawLink, fallbackId = "") {
 export function decisionDetailLink(domain, providerId) {
   const id = String(providerId || "");
   if (!/^\d+$/.test(id)) return "";
-  const path = domain === "precedent" ? "precInfoP.do" : "detcInfoP.do";
-  const parameter = domain === "precedent" ? "precSeq" : "detcSeq";
-  return `https://www.law.go.kr/LSW/${path}?${parameter}=${encodeURIComponent(id)}`;
+  const links = {
+    precedent: ["precInfoP.do", "precSeq"],
+    constitutional: ["detcInfoP.do", "detcSeq"],
+    admin_appeal: ["deccInfoP.do", "deccSeq"],
+  };
+  const [path, parameter] = links[domain] || [];
+  return path && parameter
+    ? `https://www.law.go.kr/LSW/${path}?${parameter}=${encodeURIComponent(id)}`
+    : "";
 }
 
 export function articleToJoNo(article) {
@@ -174,7 +185,7 @@ export async function enrichLawReferences(referenceText, telemetry = null, execu
       continue;
     }
   }
-  return enriched;
+  return dedupeLawReferences(enriched);
 }
 
 export async function lookupDecisionCandidate(candidate, domain = "precedent", prefetched = null, telemetry = null, options = {}) {

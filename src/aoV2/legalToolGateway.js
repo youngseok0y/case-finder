@@ -1,6 +1,7 @@
 import { config } from "../../config.js";
 import { callTool as defaultCallTool } from "../mcpClient.js";
 import { parseDecisionDetail, parseDecisionSearchResults, parseLawSearchResults, toolText } from "../legalMcpParser.js";
+import { text } from "../text.js";
 import { createEvidenceLedger } from "./evidenceLedger.js";
 import { createSafetyController } from "./safety.js";
 import { createTelemetry } from "./telemetry.js";
@@ -9,10 +10,6 @@ import { createLegalDynamicTools, LEGAL_TOOL_NAMES } from "./legalToolDefinition
 export { LEGAL_TOOL_NAMES } from "./legalToolDefinitions.js";
 
 const DECISION_DOMAINS = new Set(["precedent", "constitutional", "admin_appeal"]);
-
-function text(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 function integerOr(value, fallback, minimum, maximum) {
   const number = Number.isInteger(value) ? value : fallback;

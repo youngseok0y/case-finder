@@ -3,6 +3,7 @@ import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { config, ROOT_DIR } from "../config.js";
+import { toolText } from "./legalMcpParser.js";
 import { logError, logInfo } from "./log.js";
 import { buildLegalMcpEnv } from "./runtimeEnv.js";
 
@@ -153,8 +154,8 @@ export async function startMcp({ probe = false } = {}) {
 
   if (probe && config.lawOc) {
     const result = await callTool("search_law", { query: config.mcpProbeQuery, display: 1 });
-    const text = result.content?.find((item) => item.type === "text")?.text || "";
-    if (result.isError || !text || text.includes("[NOT_FOUND]")) {
+    const responseText = toolText(result);
+    if (result.isError || !responseText || responseText.includes("[NOT_FOUND]")) {
       throw new Error("M0 MCP probe failed");
     }
     logInfo(`M0 MCP probe passed: search_law("${config.mcpProbeQuery}")`);

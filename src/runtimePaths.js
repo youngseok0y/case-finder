@@ -1,15 +1,12 @@
 import path from "node:path";
+import { text } from "./text.js";
 
 export const MANAGED_NODE_RELATIVE_PATH = path.join("runtime", "node", "node.exe");
 
-function nonEmpty(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : "";
-}
-
 export function resolveRuntimePaths({ source = process.env, appRoot = process.cwd(), installRoot = "" } = {}) {
-  const resolvedAppRoot = path.resolve(nonEmpty(source?.CASE_FINDER_APP_ROOT) || appRoot);
+  const resolvedAppRoot = path.resolve(text(source?.CASE_FINDER_APP_ROOT) || appRoot);
   const resolvedInstallRoot = path.resolve(
-    nonEmpty(installRoot) || nonEmpty(source?.CASE_FINDER_INSTALL_ROOT) || resolvedAppRoot,
+    text(installRoot) || text(source?.CASE_FINDER_INSTALL_ROOT) || resolvedAppRoot,
   );
   const runtimeRoot = path.join(resolvedInstallRoot, "runtime");
   const statePath = path.join(resolvedInstallRoot, "state");

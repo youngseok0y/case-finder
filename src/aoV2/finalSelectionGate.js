@@ -1,19 +1,12 @@
 import { extractCaseNumbers, normalizeCaseNumber } from "../router.js";
-
-function text(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
+import { text } from "../text.js";
+import { normalizeLawArticle } from "../lawReferences.js";
 
 const LAW_ARTICLE_PATTERN = /(?<!\d)(?:제)?\d+조(?:의\d+)?(?:제\d+항)?(?:제\d+호)?/gu;
 const GENERIC_PROVIDER_CASE_PATTERN = /(?<!\d)((?:19|20)\d{2}|\d{2})\s*([가-힣]{1,4})\s*(\d{1,7})(?!\d)/gu;
 const NON_CASE_HANGUL_CODES = new Set(["년", "년도", "월", "일", "조", "항", "호", "개", "명", "회", "세", "시", "분", "초", "원", "만원"]);
 
-export function normalizeLawArticle(value) {
-  const source = text(value).replace(/\s+/gu, "");
-  const match = source.match(/^(?:제)?(\d{1,4})조(?:의(\d{1,2}))?/u);
-  if (!match) return "";
-  return `제${Number.parseInt(match[1], 10)}조${match[2] ? `의${Number.parseInt(match[2], 10)}` : ""}`;
-}
+export { normalizeLawArticle } from "../lawReferences.js";
 
 function narrativeSegments(value) {
   const segments = text(value)

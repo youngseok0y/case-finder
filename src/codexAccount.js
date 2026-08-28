@@ -1,10 +1,7 @@
 import { getDefaultCodexAppServerRuntime } from "./codexAppServerRuntime.js";
+import { text } from "./text.js";
 
 const LOGIN_TYPES = new Set(["chatgpt", "chatgptDeviceCode"]);
-
-function text(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 function numberOrNull(value) {
   const number = Number(value);

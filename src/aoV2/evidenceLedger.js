@@ -1,15 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { normalizeCaseIdentityText } from "../caseIdentity.js";
+import { text } from "../text.js";
+import { normalizeLawArticle } from "../lawReferences.js";
 import {
   canonicalCaseIdentity,
   caseIdentityMatches,
   expandProviderCaseNumberSet,
   parseProviderCaseNumber,
 } from "./commonEvidenceEnvelope.js";
-
-function text(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 function uniquePush(list, value) {
   if (value && !list.includes(value)) list.push(value);
@@ -47,13 +45,6 @@ export function providerBoundCaseIdentityCompatibility(observedCase, detailCase)
   if (observedMembers.size === 0 || detailMembers.size === 0) return "mismatch";
   if ([...observedMembers].every((member) => detailMembers.has(member))) return "provider_compound_expansion";
   return "mismatch";
-}
-
-function normalizeLawArticle(value) {
-  const source = text(value).replace(/\s+/gu, "");
-  const match = source.match(/^(?:제)?(\d{1,4})조(?:의(\d{1,2}))?/u);
-  if (!match) return "";
-  return `제${Number.parseInt(match[1], 10)}조${match[2] ? `의${Number.parseInt(match[2], 10)}` : ""}`;
 }
 
 export function parseProviderCompoundCaseNumber(value) {

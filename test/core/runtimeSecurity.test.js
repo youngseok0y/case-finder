@@ -153,7 +153,7 @@ await (async () => {
         },
         searchRelatedLaws: async () => [],
         lookupQueryLawReferences: async () => [],
-        prepareCandidates: async () => ({ rankedCandidates: [], candidatesWithPreview: [] }),
+        prepareCandidates: async () => ({ candidatesWithPreview: [] }),
         selectCandidates: async () => ({ support: "none", selected: [], intro: "" }),
       }),
     });

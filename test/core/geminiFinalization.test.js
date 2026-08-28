@@ -98,9 +98,9 @@ await (async () => {
       collectCandidates: async () => [],
       searchRelatedLaws: async () => [],
       lookupQueryLawReferences: async () => [],
-      prepareCandidates: async () => ({ rankedCandidates: [], candidatesWithPreview: [] }),
+      prepareCandidates: async () => ({ candidatesWithPreview: [] }),
       selectCandidates,
-      finalizeGeminiDResults: async ({ telemetry }) => {
+      finalizeSelection: async ({ telemetry }) => {
         selectorOutcome = telemetry.selectorOutcome;
         return { selected: [], items: [], candidateCaseNumbers: [], lawReferences: [] };
       },
