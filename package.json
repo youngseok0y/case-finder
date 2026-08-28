@@ -19,6 +19,10 @@
     "@modelcontextprotocol/sdk": "1.30.0",
     "@openai/codex": "0.147.0",
     "dotenv": "17.4.2",
-    "korean-law-mcp": "4.9.6"
+    "korean-law-mcp": "4.12.1"
+  },
+  "overrides": {
+    "onnxruntime-node": "^1.27.0",
+    "sharp": "^0.35.3"
   }
 }

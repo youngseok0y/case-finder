@@ -82,6 +82,22 @@ test("enrichLawReferences keeps only provider-verified references and uses the a
   assert.deepEqual(calls.map((call) => call.name), ["search_law", "get_law_text"]);
 });
 
+test("enrichLawReferences prefers the observed lawId for current MCP law details", async () => {
+  const calls = [];
+  const executeTool = async (name, args) => {
+    calls.push({ name, args });
+    if (name === "search_law") return {
+      items: [{ title: args.query, lawId: "001706", mst: "284415" }],
+    };
+    assert.deepEqual(args, { lawId: "001706", jo: "제1조" });
+    return { rawText: "제1조\n실제 provider 조문 내용" };
+  };
+
+  const enriched = await enrichLawReferences("민법 제1조", null, executeTool);
+  assert.equal(enriched.length, 1);
+  assert.deepEqual(calls.map((call) => call.name), ["search_law", "get_law_text"]);
+});
+
 test("enrichLawReferences drops NOT_FOUND and error references instead of returning blank UI links", async () => {
   const notFound = await enrichLawReferences("민법 제756조", null, async (name) => {
     if (name === "search_law") return { items: [{ title: "민법", mst: "284415" }] };

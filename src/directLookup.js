@@ -145,9 +145,9 @@ export async function enrichLawReferences(referenceText, telemetry = null, execu
       const candidateNames = [reference.lawName];
       if (reference.lawName === "헌법") candidateNames.push("대한민국헌법");
       const candidate = candidates.find((item) => candidateNames.some((name) => normalizeCaseNumber(item.title) === normalizeCaseNumber(name)));
-      if (!candidate?.mst) continue;
+      if (!candidate?.mst && !candidate?.lawId) continue;
       const lawResult = await execute("get_law_text", {
-        mst: candidate.mst,
+        ...(candidate.lawId ? { lawId: candidate.lawId } : { mst: candidate.mst }),
         jo: reference.article,
       });
       const rawLawText = lawResultText(lawResult);
