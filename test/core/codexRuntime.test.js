@@ -11,6 +11,9 @@ await (async () => {
   CodexAppServerRuntime,
   parseFinalSelection,
 } = await import("../../src/codexAppServerRuntime.js");
+  const { CodexAppServerSession } = await import("../../src/codexAppServerSession.js");
+  const { AppServerClient } = await import("../../src/codexAppServerClient.js");
+  const { createCodexNativeAo } = await import("../../src/aoV2/providers/codexNativeAo.js");
   const {
   createCodexAccountManager,
   formatCodexQuotaWindowLabel,
@@ -174,6 +177,206 @@ await (async () => {
       await runtime.close();
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+
+  test("usage persistence failure does not poison the queue or invalidate a completed answer", async () => {
+    const files = new Map();
+    let failWrites = 1;
+    const fsImpl = {
+      async readFile(file) {
+        if (!files.has(file)) throw Object.assign(new Error("missing"), { code: "ENOENT" });
+        return files.get(file);
+      },
+      async mkdir() {},
+      async writeFile(file, text) {
+        if (failWrites > 0) {
+          failWrites -= 1;
+          throw new Error("simulated usage write failure");
+        }
+        files.set(file, text);
+      },
+      async rename(from, to) {
+        files.set(to, files.get(from));
+        files.delete(from);
+      },
+      async rm(file) {
+        files.delete(file);
+      },
+    };
+    const collector = createCodexUsageCollector({
+      statePath: "C:/case-finder-test/state/codex-usage.json",
+      fsImpl,
+      now: () => new Date("2026-08-28T00:00:00.000Z"),
+    });
+    await assert.rejects(() => collector.recordQuery({ total_tokens: 3 }), /simulated usage write failure/u);
+    const recovered = await collector.recordQuery({ total_tokens: 5 });
+    assert.equal(recovered.runs, 1);
+    assert.equal(recovered.totalTokens, 5);
+
+    const session = new CodexAppServerSession({
+      unregisterSession() {},
+      cleanupSessionDirectory: async () => {},
+      interruptTurn: async () => {},
+      recordSessionUsage: async () => { throw new Error("simulated usage write failure"); },
+    }, {
+      threadId: "thread-usage",
+      turnId: "pending",
+      sessionId: "session-usage",
+      timeoutMs: 1_000,
+      requestedModel: "gpt-5.6-luna",
+    });
+    session.setTurnId("turn-usage");
+    await session.handleNotification({
+      method: "turn/completed",
+      params: {
+        turn: {
+          id: "turn-usage",
+          status: "completed",
+          items: [{ type: "agentMessage", text: JSON.stringify({ selected: [] }) }],
+        },
+      },
+    });
+    assert.deepEqual((await session.next()).selection, { selected: [] });
+    await session.close();
+  });
+
+  test("buffers turn completion until turn/start assigns the turn id", async () => {
+    const session = new CodexAppServerSession({
+      unregisterSession() {},
+      cleanupSessionDirectory: async () => {},
+      interruptTurn: async () => {},
+      recordSessionUsage: async () => {},
+    }, {
+      threadId: "thread-early",
+      turnId: "pending",
+      sessionId: "session-early",
+      timeoutMs: 1_000,
+      requestedModel: "gpt-5.6-luna",
+    });
+    await session.handleNotification({
+      method: "turn/completed",
+      params: {
+        turn: {
+          id: "turn-early",
+          status: "completed",
+          items: [{ type: "agentMessage", text: JSON.stringify({ selected: [], intro: "early" }) }],
+        },
+      },
+    });
+    session.setTurnId("turn-early");
+    assert.deepEqual((await session.next()).selection, { selected: [], intro: "early" });
+    await session.close();
+  });
+
+  test("duplicate turn completion is idempotent before usage persistence resolves", async () => {
+    let releaseUsage;
+    let usageCalls = 0;
+    const usageGate = new Promise((resolve) => { releaseUsage = resolve; });
+    const session = new CodexAppServerSession({
+      unregisterSession() {},
+      cleanupSessionDirectory: async () => {},
+      interruptTurn: async () => {},
+      recordSessionUsage: async () => {
+        usageCalls += 1;
+        await usageGate;
+      },
+    }, {
+      threadId: "thread-duplicate",
+      turnId: "turn-duplicate",
+      sessionId: "session-duplicate",
+      timeoutMs: 1_000,
+      requestedModel: "gpt-5.6-luna",
+    });
+    const message = {
+      method: "turn/completed",
+      params: {
+        turn: {
+          id: "turn-duplicate",
+          status: "completed",
+          items: [{ type: "agentMessage", text: JSON.stringify({ selected: [] }) }],
+        },
+      },
+    };
+    const first = session.handleNotification(message);
+    const second = session.handleNotification(message);
+    assert.equal(usageCalls, 1);
+    releaseUsage();
+    await Promise.all([first, second]);
+    assert.deepEqual((await session.next()).selection, { selected: [] });
+    assert.equal(await session.next(), null);
+    await session.close();
+  });
+
+  test("closed app-server stdin does not create an unhandled rejection while responding to a failed request", async () => {
+    const child = new FakeChild();
+    const client = new AppServerClient(child, {
+      onServerRequest: async () => { throw new Error("simulated request handler failure"); },
+    });
+    const unhandled = [];
+    const onUnhandled = (reason) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      child.stdin.end();
+      child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: "closed-stdin", method: "item/tool/call", params: {} })}\n`);
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.deepEqual(unhandled, []);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      await client.close();
+    }
+  });
+
+  test("concurrent runtime starts share the initialization and auth-isolation gate", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "case-finder-concurrent-start-test-"));
+    let configReadStarted;
+    const configReadGate = new Promise((resolve) => { configReadStarted = resolve; });
+    let releaseConfig;
+    const configGate = new Promise((resolve) => { releaseConfig = resolve; });
+    const fakeClient = {
+      closed: false,
+      async request(method) {
+        if (method === "initialize") return { capabilities: { experimentalApi: true } };
+        if (method === "config/read") {
+          configReadStarted();
+          await configGate;
+          return { config: { additional: { cli_auth_credentials_store: "file" } } };
+        }
+        throw new Error(`unexpected request: ${method}`);
+      },
+      notify() {},
+      async close() { this.closed = true; },
+    };
+    const runtime = new CodexAppServerRuntime({
+      baseDir: path.join(root, "sessions"),
+      codexHomePath: path.join(root, "codex-home"),
+      configCwd: root,
+      source: {},
+      resolveRuntime: async () => ({ executablePath: "fake-codex", packageName: "fake", target: "fake", version: "0.147.0" }),
+      spawnImpl: () => ({}),
+      clientFactory: () => fakeClient,
+      requestTimeoutMs: 2_000,
+      sessionTimeoutMs: 2_000,
+    });
+    try {
+      const first = runtime.start();
+      await configReadGate;
+      let secondSettled = false;
+      const second = runtime.start().then(() => { secondSettled = true; });
+      await Promise.resolve();
+      assert.equal(secondSettled, false);
+      assert.equal(runtime.client, null);
+      releaseConfig();
+      await Promise.all([first, second]);
+      assert.strictEqual(runtime.client, fakeClient);
+    } finally {
+      await runtime.close();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("missing AO gateway reports the deterministic required-gateway error", () => {
+    assert.throws(() => createCodexNativeAo(), { message: "CODEX_NATIVE_AO_GATEWAY_REQUIRED" });
   });
 
   test("dynamic legal tool schema is the four-tool product surface", () => {

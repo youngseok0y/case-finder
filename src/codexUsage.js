@@ -100,7 +100,7 @@ export class CodexUsageCollector {
 
   async recordQuery(usage) {
     const normalized = normalizeCodexTokenUsage(usage);
-    this.writeChain = this.writeChain.then(async () => {
+    const operation = this.writeChain.catch(() => {}).then(async () => {
       const current = await this.read();
       current.runs += 1;
       if (normalized) {
@@ -115,7 +115,8 @@ export class CodexUsageCollector {
       this.state = current;
       await this.#writeAtomic(current);
     });
-    await this.writeChain;
+    this.writeChain = operation.catch(() => {});
+    await operation;
     return { ...this.state };
   }
 

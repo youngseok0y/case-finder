@@ -102,7 +102,11 @@ export class AppServerClient {
 
     if (message.method && message.id !== undefined) {
       void Promise.resolve(this.onServerRequest(message)).catch((error) => {
-        this.respond(message.id, null, { code: -32001, message: error?.message || "SAFETY_REJECTED" });
+        try {
+          this.respond(message.id, null, { code: -32001, message: error?.message || "SAFETY_REJECTED" });
+        } catch {
+          // The peer may have closed stdin while the request handler failed.
+        }
       });
       return;
     }

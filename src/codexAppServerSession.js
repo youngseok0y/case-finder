@@ -70,6 +70,7 @@ export class CodexAppServerSession {
     this.timeoutMs = timeoutMs;
     this.queue = [];
     this.waiters = [];
+    this.pendingTurnNotifications = [];
     this.calls = new Map();
     this.startedAt = Date.now();
     this.timer = setTimeout(() => {
@@ -80,6 +81,7 @@ export class CodexAppServerSession {
     this.closed = false;
     this.terminalError = null;
     this.finalQueued = false;
+    this.completionStarted = false;
     this.usage = null;
     this.requestedModel = normalizeModelResolution({}, requestedModel).requestedModel;
     this.modelResolution = modelResolution || normalizeModelResolution({}, this.requestedModel);
@@ -104,6 +106,14 @@ export class CodexAppServerSession {
   cleanup() {
     if (!this.cleanupPromise) this.cleanupPromise = this.runtime.cleanupSessionDirectory(this.sessionDir);
     return this.cleanupPromise;
+  }
+
+  setTurnId(turnId) {
+    if (this.ended || this.closed || !turnId) return;
+    if (this.turnId !== "pending" && String(this.turnId) !== String(turnId)) return;
+    this.turnId = turnId;
+    const pending = this.pendingTurnNotifications.splice(0);
+    for (const message of pending) void this.handleNotification(message);
   }
 
   #fail(error) {
@@ -143,11 +153,18 @@ export class CodexAppServerSession {
   }
 
   async handleNotification(message) {
-    if (this.ended && message.method !== "turn/completed") return;
+    if (this.ended || this.closed) return;
     if (message.method === "thread/tokenUsage/updated") {
       this.usage = tokenUsageFromNotification(message) || this.usage;
       return;
     }
+    if (message.method !== "turn/completed" && message.method !== "turn/failed") return;
+    const messageTurnId = turnIdFromMessage(message);
+    if (this.turnId === "pending") {
+      if (messageTurnId) this.pendingTurnNotifications.push(message);
+      return;
+    }
+    if (!messageTurnId || String(messageTurnId) !== String(this.turnId)) return;
     if (message.method === "turn/failed") {
       const failure = message.params?.turn?.error || message.params?.error || message.params?.turn || {};
       this.#fail(isCodexAuthFailure(failure)
@@ -155,9 +172,9 @@ export class CodexAppServerSession {
         : runtimeError("CODEX_APP_SERVER_TURN_FAILED", "Codex app-server turn failed"));
       return;
     }
-    if (message.method !== "turn/completed") return;
+    if (this.completionStarted) return;
+    this.completionStarted = true;
     const turn = message.params?.turn || {};
-    if (String(turn.id || turnIdFromMessage(message) || "") !== String(this.turnId)) return;
     const turnResolution = normalizeModelResolution(turn, this.requestedModel);
     if (turnResolution.hasSignal) {
       const requestedModel = turnResolution.requestedModel || this.modelResolution.requestedModel;
@@ -170,7 +187,9 @@ export class CodexAppServerSession {
     }
     try {
       const selection = parseFinalSelection(finalTextFromTurn(turn));
-      await this.runtime.recordSessionUsage(this.usage);
+      await this.runtime.recordSessionUsage(this.usage).catch(() => {
+        // Usage persistence is best effort and must not invalidate a completed answer.
+      });
       this.#enqueue({
         type: "final",
         selection,
@@ -217,6 +236,7 @@ export class CodexAppServerSession {
     if (this.closed) return;
     const shouldInterrupt = !this.ended && this.turnId && this.turnId !== "pending";
     this.closed = true;
+    this.pendingTurnNotifications = [];
     clearTimeout(this.timer);
     this.runtime.unregisterSession(this);
     if (shouldInterrupt) await this.runtime.interruptTurn(this).catch(() => {});
