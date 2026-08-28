@@ -1,0 +1,44 @@
+{
+  "baseline": {
+    "branch": "main",
+    "sha": "7b4af805ddc16cd8ee25fa0494175d0088c9d9cf",
+    "test_files": 26,
+    "tests": 132,
+    "pass": 132,
+    "fail": 0
+  },
+  "final": {
+    "branch": "refactor/final-test-suite",
+    "core_files": 10,
+    "core_tests": 106,
+    "regression_files": 3,
+    "regression_tests": 19,
+    "experimental_files": 2,
+    "experimental_tests": 7,
+    "all_tests": 132
+  },
+  "removed_duplicate_tests": 0,
+  "coverage": {
+    "baseline": {
+      "line": 100.0,
+      "branch": 100.0,
+      "function": 100.0
+    },
+    "core": {
+      "line": 100.0,
+      "branch": 100.0,
+      "function": 100.0
+    },
+    "core_regression": {
+      "line": 100.0,
+      "branch": 100.0,
+      "function": 100.0
+    },
+    "all": {
+      "line": 100.0,
+      "branch": 100.0,
+      "function": 100.0
+    }
+  },
+  "decision": "TEST_SUITE_CONSOLIDATION_PASS"
+}

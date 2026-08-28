@@ -25,7 +25,7 @@ const files = [
   ...(await filesWithExtension("public", ".js")),
   ...(await filesWithExtension("scripts", ".mjs")),
   ...(await filesWithExtension("packaging", ".mjs")),
-  ...(await fs.readdir(path.join(ROOT, "test"))).filter((file) => file.endsWith(".test.js")).map((file) => path.join(ROOT, "test", file)),
+  ...(await filesWithExtension("test", ".test.js")),
 ];
 
 for (const file of files.sort()) execFileSync(process.execPath, ["--check", file], { stdio: "inherit" });
