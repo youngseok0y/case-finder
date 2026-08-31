@@ -54,6 +54,7 @@ await (async () => {
   const assert = (await import("node:assert/strict")).default;
   const test = (await import("node:test")).default;
   const { articleToJoNo, enrichLawReferences, lawDetailLink, parseStatuteReferences } = await import("../../src/directLookup.js");
+  const { dedupeLawReferences } = await import("../../src/lawReferences.js");
   const { renderResults } = await import("../../src/renderer.js");
   function pairs(value) {
     return parseStatuteReferences(value).map(({ lawName, article }) => [lawName, article]);
@@ -134,6 +135,33 @@ await (async () => {
     assert.deepEqual(calls.map((call) => call.name), ["search_law", "get_law_text"]);
   });
 
+  test("enrichLawReferences shares duplicate work and caps provider concurrency at two", async () => {
+    const cache = new Map();
+    const calls = [];
+    let active = 0;
+    let maximumActive = 0;
+    const executeTool = async (name, args) => {
+      calls.push({ name, args });
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise((resolve) => setImmediate(resolve));
+      active -= 1;
+      if (name === "search_law") return { items: [{ title: args.query, mst: args.query === "민법" ? "1" : args.query === "형법" ? "2" : "3" }] };
+      return { rawText: `${args.jo}\n실제 provider 조문 내용` };
+    };
+
+    const [first, second] = await Promise.all([
+      enrichLawReferences("민법 제1조, 형법 제2조, 상법 제3조", null, executeTool, { lawReferenceCache: cache }),
+      enrichLawReferences("민법 제1조", null, executeTool, { lawReferenceCache: cache }),
+    ]);
+    assert.equal(first.length, 3);
+    assert.equal(second.length, 1);
+    assert.equal(calls.filter(({ name, args }) => name === "search_law" && args.query === "민법").length, 1);
+    assert.equal(calls.filter(({ name }) => name === "search_law").length, 3);
+    assert.equal(calls.filter(({ name }) => name === "get_law_text").length, 3);
+    assert.ok(maximumActive <= 2);
+  });
+
   test("enrichLawReferences prefers the observed lawId for current MCP law details", async () => {
     const calls = [];
     const executeTool = async (name, args) => {
@@ -162,6 +190,29 @@ await (async () => {
       return { isError: true, rawText: "provider error" };
     });
     assert.deepEqual(errored, []);
+  });
+
+  test("canonical law references normalize identity and retain only renderable links", () => {
+    const references = dedupeLawReferences([
+      { lawName: " 민법 ", article: " 제750조 ", link: " https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=1 " },
+      { lawName: "민법", article: "제750조", link: "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=1" },
+      { lawName: "대한민국헌법", article: "제10조", link: "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=2" },
+      { lawName: "헌법", article: "제10조", link: "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=2" },
+      { lawName: "민법", article: "제751조", link: "" },
+      { lawName: "", article: "제750조", link: "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=1" },
+    ]);
+    assert.deepEqual(references.map(({ lawName, article, link }) => ({ lawName, article, link })), [
+      {
+        lawName: "민법",
+        article: "제750조",
+        link: "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=1",
+      },
+      {
+        lawName: "대한민국헌법",
+        article: "제10조",
+        link: "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=2",
+      },
+    ]);
   });
 
   test("renderer preserves law article deeplink query parameters and opens it in a new tab", () => {

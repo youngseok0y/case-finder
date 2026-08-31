@@ -1,3 +1,5 @@
+import { expandCaseIdentitySet, normalizeCaseIdentityText } from "./caseIdentity.js";
+
 const CASE_YEAR_SOURCE = String.raw`(?:\d{2}|(?:19|20)\d{2})`;
 const CASE_SEPARATOR_SOURCE = String.raw`[\s\u002D\u2010-\u2015\u2212]*`;
 
@@ -30,10 +32,6 @@ const RELATED_SEARCH_INTENT = [
 ];
 const EXCLUSION_INTENT = /(?:이\s*(?:사건|판결)\s*(?:외에|말고|(?:을|를)?\s*제외하고)|제외하고)/u;
 
-function separatorNormalized(value) {
-  return String(value || "").replace(/[\s\u002D\u2010-\u2015\u2212]+/gu, "").trim();
-}
-
 function candidateRejectionReason(source) {
   if (DATE_LIKE.test(source)) return "date_like_token";
   if (STATUTE_LIKE.test(source)) return "statute_like_token";
@@ -57,7 +55,7 @@ function routeTelemetry({ kind, reason, matches, relatedSearchIntent, exclusionI
 }
 
 export function normalizeCaseNumber(value) {
-  return separatorNormalized(value);
+  return normalizeCaseIdentityText(value);
 }
 
 export function parseCaseNumber(value) {
@@ -72,31 +70,7 @@ export function parseCaseNumber(value) {
 }
 
 export function expandCaseNumberSet(value) {
-  const source = String(value || "").replace(/\([^)]*\)/g, "").trim();
-  if (!source) return new Set();
-
-  const parts = source
-    .split(/\s*(?:,|，|;|\/|·|및|등|외)\s*/u)
-    .map((part) => part.replace(/^[\[\]()]+|[\[\]()]+$/g, "").trim())
-    .filter(Boolean);
-  const expanded = new Set();
-  let prefix = "";
-
-  for (const part of parts) {
-    const full = parseCaseNumber(part);
-    if (full) {
-      prefix = `${full.year}${full.typeCode}`;
-      expanded.add(full.caseNumber);
-      continue;
-    }
-    const abbreviated = part.match(/^\d{1,7}$/u);
-    if (abbreviated && prefix) expanded.add(`${prefix}${abbreviated[0]}`);
-  }
-
-  if (expanded.size === 0) {
-    for (const match of extractCaseNumbers(source)) expanded.add(match.caseNumber);
-  }
-  return expanded;
+  return expandCaseIdentitySet(value);
 }
 
 export function caseNumberKey(value) {
@@ -159,7 +133,6 @@ export function routeQuery(query, maxCases = 5) {
   return {
     kind,
     cases: kind === "direct" ? matches.slice(0, maxCases) : [],
-    ignoredCaseCount: kind === "direct" ? Math.max(0, matches.length - maxCases) : 0,
     telemetry: routeTelemetry({ kind, reason, matches, relatedSearchIntent, exclusionIntent }),
   };
 }

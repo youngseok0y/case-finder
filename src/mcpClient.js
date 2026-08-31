@@ -3,6 +3,8 @@ import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { config, ROOT_DIR } from "../config.js";
+import { classifyLegalResult, LEGAL_RESULT_CATEGORIES } from "./legalResultClassifier.js";
+import { parseLawSearchResults, toolText } from "./legalMcpParser.js";
 import { logError, logInfo } from "./log.js";
 import { buildLegalMcpEnv } from "./runtimeEnv.js";
 
@@ -153,8 +155,13 @@ export async function startMcp({ probe = false } = {}) {
 
   if (probe && config.lawOc) {
     const result = await callTool("search_law", { query: config.mcpProbeQuery, display: 1 });
-    const text = result.content?.find((item) => item.type === "text")?.text || "";
-    if (result.isError || !text || text.includes("[NOT_FOUND]")) {
+    const responseText = toolText(result) || (typeof result?.rawText === "string" ? result.rawText : "");
+    const category = classifyLegalResult(result, {
+      toolName: "search_law",
+      rawText: responseText,
+      parsedItems: parseLawSearchResults(responseText).length > 0,
+    });
+    if (category !== LEGAL_RESULT_CATEGORIES.SUCCESS) {
       throw new Error("M0 MCP probe failed");
     }
     logInfo(`M0 MCP probe passed: search_law("${config.mcpProbeQuery}")`);

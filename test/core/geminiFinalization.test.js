@@ -2,7 +2,18 @@
 await (async () => {
   const assert = (await import("node:assert/strict")).default;
   const test = (await import("node:test")).default;
-  const { validateSelection } = await import("../../src/gemini.js");
+  const { fillPrompt, validateSelection } = await import("../../src/gemini.js");
+  test("prompt values containing replacement tokens are inserted byte-for-byte", () => {
+    const value = "$& $' $` $$";
+    assert.equal(
+      fillPrompt("Q={{USER_QUERY}}|F={{FIRST_PASS}}|C={{CANDIDATES}}", {
+        query: value,
+        firstPass: value,
+        candidates: value,
+      }),
+      `Q=${value}|F=${value}|C=${value}`,
+    );
+  });
   test("direct support keeps direct selection", () => {
     assert.deepEqual(validateSelection({
       support: "direct",
@@ -61,6 +72,45 @@ await (async () => {
       match: "related",
     }));
     assert.equal(validateSelection({ support: "related_only", selected, intro: "" }).selected.length, 5);
+  });
+})();
+
+// Consolidated from selector lifecycle regression coverage.
+await (async () => {
+  const assert = (await import("node:assert/strict")).default;
+  const test = (await import("node:test")).default;
+  const { runDeterministicPipeline } = await import("../../src/nlPipeline.js");
+
+  const plan = {
+    queries: [
+      { query: "anchor one", domain: "precedent", kind: "anchor" },
+      { query: "anchor two", domain: "precedent", kind: "anchor" },
+      { query: "support one", domain: "precedent", kind: "support" },
+      { query: "support two", domain: "precedent", kind: "support" },
+    ],
+    law_names: [],
+  };
+
+  async function runWithSelector(selectCandidates) {
+    let selectorOutcome;
+    await runDeterministicPipeline("selector outcome fixture", {
+      generatePlan: async () => plan,
+      collectCandidates: async () => [],
+      searchRelatedLaws: async () => [],
+      lookupQueryLawReferences: async () => [],
+      prepareCandidates: async () => ({ candidatesWithPreview: [] }),
+      selectCandidates,
+      finalizeSelection: async ({ telemetry }) => {
+        selectorOutcome = telemetry.selectorOutcome;
+        return { selected: [], items: [], candidateCaseNumbers: [], lawReferences: [] };
+      },
+    });
+    return selectorOutcome;
+  }
+
+  test("selector abstention and selector failure have explicit internal outcomes", async () => {
+    assert.equal(await runWithSelector(async () => ({ support: "none", selected: [], intro: "" })), "success");
+    assert.equal(await runWithSelector(async () => { throw new Error("selector unavailable"); }), "failed");
   });
 })();
 

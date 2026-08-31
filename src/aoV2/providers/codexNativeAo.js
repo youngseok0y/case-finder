@@ -58,7 +58,7 @@ function nativeToolCall(event) {
 
 export function createCodexNativeAo({
   gateway,
-  ledger = gateway.ledger,
+  ledger,
   telemetry = createTelemetry({ provider: "codex_luna", model: config.codexModel, reasoningEffort: config.codexReasoningEffort }),
   safety = createSafetyController(),
   createSession,
@@ -67,6 +67,7 @@ export function createCodexNativeAo({
 } = {}) {
   if (!gateway) throw new Error("CODEX_NATIVE_AO_GATEWAY_REQUIRED");
   if (typeof createSession !== "function") throw new Error("CODEX_NATIVE_SESSION_FACTORY_REQUIRED");
+  ledger = ledger || gateway.ledger;
   const evidenceEnvelope = envelope || createCommonEvidenceEnvelope({ ledger, resultMax });
 
   return {

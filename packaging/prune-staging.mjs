@@ -8,8 +8,7 @@ const LEVELS = Object.freeze({
   1: ["node_modules/@huggingface/transformers"],
   2: ["node_modules/@hyzyla/pdfium"],
   3: ["node_modules/onnxruntime-node"],
-  4: [],
-  5: [
+  4: [
     "node_modules/sharp",
     "node_modules/@img/colour",
     "node_modules/@img/sharp-win32-x64",

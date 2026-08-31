@@ -1,6 +1,9 @@
 import { config } from "../config.js";
 import { callTool } from "./mcpClient.js";
+import { classifyLegalResult, LEGAL_RESULT_CATEGORIES } from "./legalResultClassifier.js";
+import { dedupeLawReferences, lawReferenceIdentityKey } from "./lawReferences.js";
 import { caseNumberIncludes, normalizeCaseNumber } from "./router.js";
+import { text } from "./text.js";
 import {
   cleanText,
   decodeBasicHtml,
@@ -22,7 +25,14 @@ export function recordMcpCall(telemetry, name) {
   if (name === "get_decision_text" || name === "get_law_text") telemetry.mcpDetailCalls = (telemetry.mcpDetailCalls || 0) + 1;
 }
 
+function abortedError() {
+  const error = new Error("MCP 호출이 취소되었습니다.");
+  error.code = "ABORTED";
+  return error;
+}
+
 export async function trackedCallTool(name, args, telemetry = null, options = {}) {
+  if (options.signal?.aborted) throw abortedError();
   recordMcpCall(telemetry, name);
   const executeTool = typeof telemetry?.executeTool === "function"
     ? telemetry.executeTool
@@ -45,6 +55,10 @@ export function sanitizeApiLink(rawLink, fallbackId = "") {
       const id = link.searchParams.get("ID") || fallbackId;
       if (id) return `https://www.law.go.kr/LSW/detcInfoP.do?detcSeq=${encodeURIComponent(id)}`;
     }
+    if (link.pathname.toLowerCase() === "/drf/lawservice.do" && link.searchParams.get("target") === "decc") {
+      const id = link.searchParams.get("ID") || fallbackId;
+      if (id) return `https://www.law.go.kr/LSW/deccInfoP.do?deccSeq=${encodeURIComponent(id)}`;
+    }
     if (link.pathname.toLowerCase() === "/drf/lawservice.do" && link.searchParams.get("target") === "law") {
       const mst = link.searchParams.get("MST") || fallbackId;
       if (/^\d+$/.test(mst)) return `https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=${encodeURIComponent(mst)}`;
@@ -59,9 +73,15 @@ export function sanitizeApiLink(rawLink, fallbackId = "") {
 export function decisionDetailLink(domain, providerId) {
   const id = String(providerId || "");
   if (!/^\d+$/.test(id)) return "";
-  const path = domain === "precedent" ? "precInfoP.do" : "detcInfoP.do";
-  const parameter = domain === "precedent" ? "precSeq" : "detcSeq";
-  return `https://www.law.go.kr/LSW/${path}?${parameter}=${encodeURIComponent(id)}`;
+  const links = {
+    precedent: ["precInfoP.do", "precSeq"],
+    constitutional: ["detcInfoP.do", "detcSeq"],
+    admin_appeal: ["deccInfoP.do", "deccSeq"],
+  };
+  const [path, parameter] = links[domain] || [];
+  return path && parameter
+    ? `https://www.law.go.kr/LSW/${path}?${parameter}=${encodeURIComponent(id)}`
+    : "";
 }
 
 export function articleToJoNo(article) {
@@ -88,11 +108,19 @@ export function lawDetailLink(mst, article = "") {
 
 function lawSearchItems(result) {
   if (Array.isArray(result?.items)) return result.items;
-  return parseLawSearchResults(toolText(result));
+  return parseLawSearchResults(result?.rawText || toolText(result));
 }
 
 function lawResultText(result) {
   return cleanText(result?.rawText || toolText(result));
+}
+
+function rawToolText(result) {
+  return typeof result?.rawText === "string" && result.rawText ? result.rawText : toolText(result);
+}
+
+function normalizedLawName(value) {
+  return text(value).replace(/\s+/gu, "").replace(/^대한민국헌법$/u, "헌법");
 }
 
 function cleanLawArticleText(rawText) {
@@ -129,42 +157,93 @@ export function parseStatuteReferences(referenceText) {
   return references;
 }
 
+function lawSearchCacheKey(lawName) {
+  return `law-search:${lawReferenceIdentityKey({ lawName, article: "" })}`;
+}
+
+function lawDetailCacheKey(candidate, article) {
+  const identity = candidate?.lawId ? `lawId:${candidate.lawId}` : `mst:${candidate?.mst || ""}`;
+  return `law-detail:${identity}:${article}`;
+}
+
+export async function findLawCandidate(lawName, execute, cache = new Map()) {
+  const key = lawSearchCacheKey(lawName);
+  if (cache.has(key)) return cache.get(key);
+  const promise = (async () => {
+    const searchResult = await execute("search_law", {
+      query: lawName,
+      display: 5,
+    });
+    const candidates = lawSearchItems(searchResult);
+    const searchCategory = classifyLegalResult(searchResult, {
+      toolName: "search_law",
+      rawText: rawToolText(searchResult),
+      parsedItems: candidates.length > 0,
+    });
+    if (searchCategory !== LEGAL_RESULT_CATEGORIES.SUCCESS) return null;
+    const target = normalizedLawName(lawName);
+    const candidate = candidates.find((item) => normalizedLawName(item.title) === target);
+    return candidate?.mst || candidate?.lawId ? candidate : null;
+  })();
+  cache.set(key, promise);
+  return promise;
+}
+
 export async function enrichLawReferences(referenceText, telemetry = null, executeTool = null, options = {}) {
   const references = parseStatuteReferences(referenceText).slice(0, config.lawMax);
-  const enriched = [];
+  const cache = options.lawReferenceCache instanceof Map ? options.lawReferenceCache : new Map();
   const execute = typeof executeTool === "function"
     ? executeTool
     : (name, args) => trackedCallTool(name, args, telemetry, options);
-  for (const reference of references) {
-    try {
-      const searchResult = await execute("search_law", {
-        query: reference.lawName,
-        display: 5,
-      });
-      const candidates = lawSearchItems(searchResult);
-      const candidateNames = [reference.lawName];
-      if (reference.lawName === "헌법") candidateNames.push("대한민국헌법");
-      const candidate = candidates.find((item) => candidateNames.some((name) => normalizeCaseNumber(item.title) === normalizeCaseNumber(name)));
-      if (!candidate?.mst && !candidate?.lawId) continue;
-      const lawResult = await execute("get_law_text", {
-        ...(candidate.lawId ? { lawId: candidate.lawId } : { mst: candidate.mst }),
-        jo: reference.article,
-      });
-      const rawLawText = lawResultText(lawResult);
-      const lawText = cleanLawArticleText(rawLawText);
-      if (lawResult?.isError || !lawText || rawLawText.includes("[NOT_FOUND]")) {
-        continue;
+  const resolveReference = (reference) => {
+    const key = lawReferenceIdentityKey(reference);
+    if (cache.has(key)) return cache.get(key);
+    const promise = (async () => {
+      try {
+        if (options.signal?.aborted) throw abortedError();
+        const candidate = await findLawCandidate(reference.lawName, execute, cache);
+        if (!candidate) return null;
+        if (options.signal?.aborted) throw abortedError();
+        const detailKey = lawDetailCacheKey(candidate, reference.article);
+        let detailPromise = cache.get(detailKey);
+        if (!detailPromise) {
+          detailPromise = (async () => {
+            const lawResult = await execute("get_law_text", {
+              ...(candidate.lawId ? { lawId: candidate.lawId } : { mst: candidate.mst }),
+              jo: reference.article,
+            });
+            const rawLawText = lawResultText(lawResult);
+            const lawText = cleanLawArticleText(rawLawText);
+            const lawCategory = classifyLegalResult(lawResult, {
+              toolName: "get_law_text",
+              rawText: rawToolText(lawResult),
+            });
+            return lawCategory === LEGAL_RESULT_CATEGORIES.SUCCESS && lawText ? { lawText } : null;
+          })();
+          cache.set(detailKey, detailPromise);
+        }
+        const detail = await detailPromise;
+        if (!detail) return null;
+        return {
+          ...reference,
+          text: detail.lawText,
+          link: lawDetailLink(candidate.mst, reference.article) || sanitizeApiLink(candidate.link, candidate.mst),
+        };
+      } catch (error) {
+        if (options.signal?.aborted || error?.code === "ABORTED" || error?.name === "AbortError") throw error;
+        return null;
       }
-      enriched.push({
-        ...reference,
-        text: lawText,
-        link: lawDetailLink(candidate.mst, reference.article) || sanitizeApiLink(candidate.link, candidate.mst),
-      });
-    } catch {
-      continue;
-    }
+    })();
+    cache.set(key, promise);
+    return promise;
+  };
+
+  const enriched = [];
+  for (let index = 0; index < references.length; index += 2) {
+    const batch = references.slice(index, index + 2);
+    enriched.push(...await Promise.all(batch.map(resolveReference)));
   }
-  return enriched;
+  return dedupeLawReferences(enriched.filter(Boolean));
 }
 
 export async function lookupDecisionCandidate(candidate, domain = "precedent", prefetched = null, telemetry = null, options = {}) {
@@ -173,11 +252,13 @@ export async function lookupDecisionCandidate(candidate, domain = "precedent", p
     id: candidate.id,
     full: false,
   }, telemetry, options);
-  const detailText = prefetched?.text || toolText(detailResult);
+  const detailText = prefetched?.text || rawToolText(detailResult);
   const detail = prefetched?.detail || parseDecisionDetail(detailText);
-  const detailValid = !detailResult?.isError
-    && !detailText.includes("[NOT_FOUND]")
-    && !detailText.includes("[HALLUCINATION_DETECTED]")
+  const detailCategory = classifyLegalResult(detailResult, {
+    toolName: "get_decision_text",
+    rawText: detailText,
+  });
+  const detailValid = detailCategory === LEGAL_RESULT_CATEGORIES.SUCCESS
     && caseNumberIncludes(detail.caseNumber, candidate.caseNumber);
 
   return {
@@ -204,12 +285,17 @@ async function lookupOne(caseRequest, callOptions = {}) {
     options: searchOptions,
     display: 100,
   }, callOptions);
-  const searchText = toolText(searchResult);
+  const searchText = rawToolText(searchResult);
   const candidates = parseDecisionSearchResults(searchText);
+  const searchCategory = classifyLegalResult(searchResult, {
+    toolName: "search_decisions",
+    rawText: searchText,
+    parsedItems: candidates.length > 0,
+  });
   const candidate = candidates.find(
     (item) => caseNumberIncludes(item.caseNumber, caseRequest.caseNumber),
   );
-  if (searchText.includes("[NOT_FOUND]")) {
+  if (searchCategory === LEGAL_RESULT_CATEGORIES.NOT_FOUND) {
     return {
       status: "not_found",
       caseNumber: caseRequest.caseNumber,
@@ -220,7 +306,7 @@ async function lookupOne(caseRequest, callOptions = {}) {
   // An upstream/API error is not evidence that the requested case does not
   // exist. Keep the result in the verification-failure path so the product
   // does not show a false direct-miss message.
-  if (searchResult.isError || !candidate) {
+  if (searchCategory !== LEGAL_RESULT_CATEGORIES.SUCCESS || !candidate) {
     return {
       status: "search_failed",
       caseNumber: caseRequest.caseNumber,
@@ -241,7 +327,7 @@ async function lookupOne(caseRequest, callOptions = {}) {
 }
 
 export async function lookupDirect(query, route, { abortSignal = null } = {}) {
-  const options = { signal: abortSignal };
+  const options = { signal: abortSignal, lawReferenceCache: new Map() };
   const items = [];
   for (const caseRequest of route.cases) {
     items.push(await lookupOne(caseRequest, options));
@@ -250,7 +336,6 @@ export async function lookupDirect(query, route, { abortSignal = null } = {}) {
     route: "direct",
     query,
     requestedCaseNumbers: route.cases.map((item) => item.caseNumber),
-    ignoredCaseCount: route.ignoredCaseCount,
     items,
   };
 }

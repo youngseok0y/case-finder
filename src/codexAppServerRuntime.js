@@ -90,12 +90,14 @@ export class CodexAppServerRuntime {
     this.sessions = new Map();
     this.notificationListeners = new Set();
     this.shuttingDown = false;
+    this.runtimeInspection = null;
+    this.inspectPromise = null;
   }
 
   async start() {
     if (this.shuttingDown) throw runtimeError("CODEX_APP_SERVER_PROCESS_CLOSED", "Codex app-server runtime is closed");
-    if (this.client && !this.client.closed) return this;
     if (this.startPromise) return this.startPromise;
+    if (this.client && !this.client.closed) return this;
     this.startPromise = (async () => {
       this.runtime = await this.resolveRuntime();
       await fs.mkdir(this.baseDir, { recursive: true });
@@ -116,7 +118,6 @@ export class CodexAppServerRuntime {
         onNotification: (message) => this.#handleNotification(message),
         onProcessError: (error) => this.#handleProcessError(error),
       });
-      this.client = client;
       try {
         await client.request("initialize", {
           capabilities: { experimentalApi: true },
@@ -133,6 +134,8 @@ export class CodexAppServerRuntime {
           throw runtimeError("CODEX_AUTH_ISOLATION_UNSAFE", "effective Codex credential store could not be verified", error);
         }
         assertFileCredentialStore(effectiveConfig);
+        if (this.shuttingDown) throw runtimeError("CODEX_APP_SERVER_PROCESS_CLOSED", "Codex app-server runtime is closed");
+        this.client = client;
       } catch (error) {
         await client.close().catch(() => {});
         this.client = null;
@@ -218,7 +221,7 @@ export class CodexAppServerRuntime {
       }, Math.max(this.requestTimeoutMs, Number(this.sessionTimeoutMs)));
       const turnId = turn?.turn?.id || turn?.id;
       if (!turnId) throw runtimeError("CODEX_APP_SERVER_TURN_ID_MISSING", "turn/start returned no id");
-      session.turnId = turnId;
+      session.setTurnId(turnId);
       return session;
     } catch (error) {
       await session.close();
@@ -276,8 +279,18 @@ export class CodexAppServerRuntime {
   }
 
   async inspect() {
-    const runtime = await this.resolveRuntime();
-    return { ...appServerRuntimeStatus(runtime), executablePath: runtime.executablePath };
+    if (this.runtimeInspection) return { ...this.runtimeInspection };
+    if (!this.inspectPromise) {
+      this.inspectPromise = (async () => {
+        const runtime = await this.resolveRuntime();
+        const inspection = Object.freeze({ ...appServerRuntimeStatus(runtime), executablePath: runtime.executablePath });
+        this.runtimeInspection = inspection;
+        return inspection;
+      })().finally(() => {
+        this.inspectPromise = null;
+      });
+    }
+    return { ...(await this.inspectPromise) };
   }
 
   async close() {

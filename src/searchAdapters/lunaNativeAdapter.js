@@ -2,7 +2,8 @@ import { createAgenticSearchV2 } from "../aoV2/index.js";
 import { getDefaultCodexAccountManager } from "../codexAccount.js";
 import { createCodexAppServerSessionFactory } from "../codexAppServerRuntime.js";
 import { selectCodexModel } from "../codexModelSelection.js";
-import { enrichLawReferences, lawDetailLink, parseStatuteReferences } from "../directLookup.js";
+import { decisionDetailLink, enrichLawReferences, lawDetailLink, parseStatuteReferences } from "../directLookup.js";
+import { dedupeLawReferences, lawReferenceIdentityKey } from "../lawReferences.js";
 import { config } from "../../config.js";
 import { toResultContract } from "./resultContract.js";
 
@@ -26,38 +27,7 @@ function executionPinForModel(model) {
 
 function buildLunaLawReferences(result) {
   const references = Array.isArray(result.lawReferences) ? result.lawReferences : [];
-  const seen = new Set();
-  return references.filter((law) => {
-    if (!law || typeof law !== "object") return false;
-    const link = law.link || lawDetailLink(law.mst);
-    const key = `${law.lawName || ""}|${law.article || ""}|${link}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return Boolean(law.lawName || link);
-  }).map((law) => ({ ...law, link: law.link || lawDetailLink(law.mst) }));
-}
-
-function lawReferenceKey(law) {
-  return `${law?.lawName || ""}|${law?.article || ""}|${law?.link || ""}`;
-}
-
-function lawReferenceIdentityKey(law) {
-  return `${law?.lawName || ""}|${law?.article || ""}`;
-}
-
-function renderableLawReference(law) {
-  return Boolean(law?.lawName && law?.link);
-}
-
-function uniqueLawReferences(references) {
-  const seen = new Set();
-  return references.filter((law) => {
-    if (!renderableLawReference(law)) return false;
-    const key = lawReferenceKey(law);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return dedupeLawReferences(references, { resolveLink: (law) => lawDetailLink(law.mst) });
 }
 
 export async function enrichLunaRelatedLawReferences(items, { gateway, telemetry } = {}) {
@@ -91,26 +61,15 @@ export async function enrichLunaRelatedLawReferences(items, { gateway, telemetry
   const enrichedByKey = new Map(enriched.map((law) => [lawReferenceIdentityKey(law), law]));
   const enrichedItems = items.map((item) => {
     const references = referencesByItem.get(item) || [];
-    const itemLawReferences = uniqueLawReferences(references
+    const itemLawReferences = dedupeLawReferences(references
       .map((reference) => enrichedByKey.get(lawReferenceIdentityKey(reference)))
       .filter(Boolean));
     return { ...item, lawReferences: itemLawReferences };
   });
   return {
     items: enrichedItems,
-    lawReferences: uniqueLawReferences(enriched),
+    lawReferences: dedupeLawReferences(enriched),
   };
-}
-
-function nativeDecisionLink(domain, providerId) {
-  const id = String(providerId || "");
-  if (!/^\d+$/u.test(id)) return "";
-  if (domain === "precedent") return `https://www.law.go.kr/LSW/precInfoP.do?precSeq=${encodeURIComponent(id)}`;
-  if (domain === "constitutional") return `https://www.law.go.kr/LSW/detcInfoP.do?detcSeq=${encodeURIComponent(id)}`;
-  if (domain === "admin_appeal") {
-    return `https://www.law.go.kr/DRF/lawService.do?target=decc&ID=${encodeURIComponent(id)}&type=JSON&mobileYn=`;
-  }
-  return "";
 }
 
 export function buildLunaResultItems(result = {}, ledger = null) {
@@ -137,7 +96,7 @@ export function buildLunaResultItems(result = {}, ledger = null) {
       court: candidate.court || "",
       date: candidate.date || "",
       type: candidate.type || "",
-      link: nativeDecisionLink(candidate.domain, candidate.id),
+      link: decisionDetailLink(candidate.domain, candidate.id),
       detail: {
         caseNumber: providerCaseNumber,
         court: candidate.court || "",
@@ -166,7 +125,7 @@ export function createLunaNativeAdapter({
   if (!run && (!persistentSearch || typeof persistentSearch.runWithContext !== "function")) {
     throw new Error("LUNA_NATIVE_SEARCH_FACTORY_INVALID");
   }
-  async function selectedModel(options) {
+  async function selectedModel() {
     const manager = accountManager || (usesDefaultSearch ? getDefaultCodexAccountManager() : null);
     if (!manager || typeof manager.read !== "function") return selectCodexModel("unknown");
     try {
@@ -181,7 +140,7 @@ export function createLunaNativeAdapter({
     architecture: "AO_V2_NATIVE",
     executionPin: LUNA_NATIVE_EXECUTION_PIN,
     async runNaturalQuery(query, options = {}) {
-      const model = await selectedModel(options);
+      const model = await selectedModel();
       const runOptions = { ...options, model };
       const context = run
         ? { result: await run(query, { ...runOptions, provider: "codex_luna" }), ledger: null }

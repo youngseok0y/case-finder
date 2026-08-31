@@ -12,11 +12,3 @@ export const SEARCH_FAILED_MESSAGE = "판례 검색 또는 원문 검증 과정�
 export const NO_RESULT_MESSAGE = "검색을 완료했지만 표시할 수 있는 검증된 결과가 없습니다.";
 export const DIRECT_LOOKUP_MISS_PRIMARY = "해당 사건번호의 판결을 국가법령정보센터에서 찾지 못했습니다. 사건번호가 정확한지 다시 확인해 주세요.";
 export const DIRECT_LOOKUP_MISS_SECONDARY = "국가법령정보센터에 수록되지 않았거나 공개 범위가 다른 판결은 대한민국 법원의 판결서 인터넷열람 또는 판결서사본 제공신청에서 확인할 수 있는 경우가 있습니다.";
-export const SEARCH_STATUS_LABELS = Object.freeze({
-  SUCCESS: "검색 완료",
-  NO_RESULT: "검색 완료 · 결과 없음",
-  SEARCH_FAILED: "검색 검증 실패",
-  SAFETY_REJECTED: "안전 검증으로 표시 차단",
-  LUNA_RUNTIME_UNAVAILABLE: "Luna runtime 사용 불가",
-  NETWORK_SERVER_ERROR: "서버 오류",
-});

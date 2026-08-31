@@ -28,7 +28,7 @@ const EVENT_RANK = {
 };
 
 const FAILURE_HEADINGS = Object.freeze({
-  SEARCH_FAILED: "원문 검증에 실패했습니다",
+  SEARCH_FAILED: "검색 검증에 실패했습니다",
   SAFETY_REJECTED: "결과를 표시하지 않았습니다",
   NO_RESULT: "표시할 결과가 없습니다",
   LUNA_RUNTIME_UNAVAILABLE: "검색 엔진을 사용할 수 없습니다",
@@ -39,7 +39,7 @@ const TERMINAL_STATUS = Object.freeze({
   SUCCESS: ["검색을 완료했습니다.", "success"],
   PARTIAL_VERIFIED: ["검색 완료 · 일부 결과를 확인했습니다.", "notice"],
   NO_RESULT: ["검색 완료 · 표시할 결과가 없습니다.", "notice"],
-  SEARCH_FAILED: ["원문 검증에 실패했습니다.", "error"],
+  SEARCH_FAILED: ["검색 검증에 실패했습니다.", "error"],
   SAFETY_REJECTED: ["안전 검증으로 결과 표시가 차단되었습니다.", "error"],
   LUNA_RUNTIME_UNAVAILABLE: ["Luna runtime을 사용할 수 없습니다.", "error"],
   NETWORK_SERVER_ERROR: ["서버 오류로 검색을 완료하지 못했습니다.", "error"],

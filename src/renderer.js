@@ -1,3 +1,4 @@
+import { dedupeLawReferences } from "./lawReferences.js";
 import {
   DIRECT_LOOKUP_MISS_PRIMARY,
   DIRECT_LOOKUP_MISS_SECONDARY,
@@ -53,21 +54,15 @@ function renderLawReference(reference) {
 }
 
 function renderLawSection(references) {
-  const laws = [];
-  const seenLaws = new Set();
-  for (const law of references || []) {
-    const key = `${law?.lawName || ""}|${law?.article || ""}|${law?.link || ""}`;
-    if (seenLaws.has(key)) continue;
-    seenLaws.add(key);
-    const rendered = renderLawReference(law);
-    if (rendered) laws.push(rendered);
-  }
+  const laws = dedupeLawReferences(references, {
+    isRenderable: (law) => Boolean(law?.lawName && safeHref(law.link, "/LSW/lsInfoP.do")),
+  }).map(renderLawReference);
   return laws.length > 0 ? `<section class="result-section"><h2>관련 법규<span class="section-count">${laws.length}건</span></h2><ul class="law-list">${laws.join("")}</ul></section>` : "";
 }
 
 function renderCase(item) {
   if (item?.status !== "verified") return "";
-  const href = safeHref(item.link, ["/LSW/precInfoP.do", "/LSW/detcInfoP.do"]);
+  const href = safeHref(item.link, ["/LSW/precInfoP.do", "/LSW/detcInfoP.do", "/LSW/deccInfoP.do"]);
   const caseNumber = escapeHtml(item.caseNumber || "사건번호 미상");
   const link = href
     ? `<a class="case-number" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${caseNumber}</a>`
@@ -140,8 +135,5 @@ export function renderResults(result = {}) {
   const lawSection = renderLawSection(lawReferences);
   const intro = result.intro ? `<p class="intro">${textBlock(result.intro)}</p>` : "";
   const fallback = result.fallbackLabel ? `<p class="notice">${escapeHtml(result.fallbackLabel)}</p>` : "";
-  const ignored = result.ignoredCaseCount > 0
-    ? `<p class="notice">사건번호는 최대 5개까지만 조회했습니다. 초과한 ${escapeHtml(result.ignoredCaseCount)}개는 무시했습니다.</p>`
-    : "";
-  return `<div class="case-finder-results" data-terminal-state="SUCCESS">${query}${intro}${fallback}${ignored}<section class="result-section"><h2>${caseHeading}</h2>${cases}</section>${lawSection}</div>`;
+  return `<div class="case-finder-results" data-terminal-state="SUCCESS">${query}${intro}${fallback}<section class="result-section"><h2>${caseHeading}</h2>${cases}</section>${lawSection}</div>`;
 }

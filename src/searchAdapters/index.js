@@ -1,4 +1,5 @@
 export { createSearchAdapterRegistry, defaultSearchAdapterRegistry, SEARCH_ADAPTER_IDS, SearchAdapterUnsupportedError } from "./registry.js";
+export { SEARCH_ADAPTER_CATALOG, getSearchAdapterDefinition, isSupportedSearchAdapter } from "./catalog.js";
 export { createGeminiDAdapter, GEMINI_D_EXECUTION_PIN } from "./geminiDAdapter.js";
 export { createLunaNativeAdapter, LUNA_NATIVE_EXECUTION_PIN } from "./lunaNativeAdapter.js";
 export { RESULT_CONTRACT_VERSION, assertResultContract, toResultContract } from "./resultContract.js";

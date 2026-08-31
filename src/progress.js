@@ -47,7 +47,7 @@ const EVENT_LABEL = Object.freeze({
   FINALIZING: "검증된 결과를 정리하고 있습니다.",
   MODEL_FALLBACK: "사용 가능한 모델로 검색을 이어가고 있습니다.",
   SEARCH_COMPLETE: "검색을 완료했습니다.",
-  SEARCH_FAILED: "검색을 완료하지 못했습니다.",
+  SEARCH_FAILED: "검색 검증에 실패했습니다.",
 });
 
 function count(value) {

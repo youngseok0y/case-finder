@@ -18,12 +18,29 @@ function setConfigured(id, configured) {
   if (element) element.textContent = configured ? "설정되어 있어요 · 값은 표시하지 않습니다" : "아직 설정되지 않았어요";
 }
 
+function setAdapterOptions(options, selected) {
+  const select = document.querySelector("#SEARCH_ADAPTER");
+  if (!select || !Array.isArray(options)) return;
+  const elements = options
+    .filter((option) => option && typeof option.id === "string" && typeof option.label === "string")
+    .map((option) => {
+      const element = document.createElement("option");
+      element.value = option.id;
+      element.textContent = option.label;
+      return element;
+    });
+  select.replaceChildren(...elements);
+  select.value = selected;
+  select.removeAttribute("aria-busy");
+  select.disabled = false;
+}
+
 async function loadSettings() {
   try {
     const response = await fetch("/admin/config", { cache: "no-store" });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.message || `HTTP ${response.status}`);
-    document.querySelector("#SEARCH_ADAPTER").value = payload.adapter;
+    setAdapterOptions(payload.adapterOptions, payload.adapter);
     setConfigured("gemini-configured", payload.configured.geminiApiKey);
     setConfigured("law-configured", payload.configured.lawOc);
   } catch (error) {

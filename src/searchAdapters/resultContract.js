@@ -1,3 +1,5 @@
+import { text } from "../text.js";
+
 export const RESULT_CONTRACT_VERSION = "m9-result-contract-v1";
 
 const SNAKE_CASE_FIELDS = Object.freeze([
@@ -14,10 +16,6 @@ const SNAKE_CASE_FIELDS = Object.freeze([
   "rejected_selected",
   "execution_pin",
 ]);
-
-function text(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 function arrayOr(value, fallback = []) {
   return Array.isArray(value) ? [...value] : fallback;

@@ -66,26 +66,30 @@ function verifyAppServerCapabilities(runtime) {
   }
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 15_000) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15_000, fetchImpl = fetch) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await fetchImpl(url, { ...options, signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function waitForHealth(port, child) {
+export async function waitForHealth(
+  port,
+  child,
+  { fetchImpl = fetch, sleep = () => new Promise((resolve) => setTimeout(resolve, 500)) } = {},
+) {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     if (child.exitCode !== null) fail("MANAGED_SERVER_EXITED", `exit:${child.exitCode}`);
     try {
-      const response = await fetchWithTimeout(`http://127.0.0.1:${port}/health`, {}, 2_000);
-      if (response.status === 200) return response.json();
+      const response = await fetchWithTimeout(`http://127.0.0.1:${port}/health`, {}, 2_000, fetchImpl);
+      if (response.status === 200) return await response.json();
     } catch {
       // The server may still be starting.
     }
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await sleep();
   }
   fail("MANAGED_HEALTH_TIMEOUT", `port:${port}`);
 }
@@ -187,11 +191,13 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(JSON.stringify({
-    status: "M11_CODEX_APP_SERVER_BLOCKED",
-    code: error.code || "MANAGED_RUNTIME_VERIFICATION_FAILED",
-    message: error.message,
-  }));
-  process.exitCode = 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  main().catch((error) => {
+    console.error(JSON.stringify({
+      status: "M11_CODEX_APP_SERVER_BLOCKED",
+      code: error.code || "MANAGED_RUNTIME_VERIFICATION_FAILED",
+      message: error.message,
+    }));
+    process.exitCode = 1;
+  });
+}

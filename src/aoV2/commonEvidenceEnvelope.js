@@ -1,69 +1,23 @@
 import { finalizeSelection } from "./finalSelectionGate.js";
+import { text } from "../text.js";
+import {
+  canonicalCaseIdentity,
+  canonicalCaseNumber,
+  caseIdentityMatches,
+  expandCaseIdentitySet,
+  parseCaseIdentity,
+} from "../caseIdentity.js";
 
-function text(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
+const parseProviderCaseNumber = parseCaseIdentity;
+const expandProviderCaseNumberSet = expandCaseIdentitySet;
 
-const PROVIDER_CASE_NUMBER_PATTERN = /(?<!\d)((?:19|20)\d{2}|\d{2})([가-힣]{1,4})(\d{1,7})$/u;
-const PROVIDER_CASE_SEPARATOR = /[\s\u002D\u2010-\u2015\u2212]+/gu;
-
-function normalizeProviderCaseText(value) {
-  return text(value).normalize("NFKC").replace(PROVIDER_CASE_SEPARATOR, "").trim();
-}
-
-export function parseProviderCaseNumber(value) {
-  const source = normalizeProviderCaseText(value);
-  const match = source.match(PROVIDER_CASE_NUMBER_PATTERN);
-  if (!match) return null;
-  return {
-    year: match[1],
-    typeCode: match[2],
-    serial: match[3],
-    caseNumber: `${match[1]}${match[2]}${match[3]}`,
-  };
-}
-
-export function expandProviderCaseNumberSet(value) {
-  const source = text(value).normalize("NFKC").replace(/\([^)]*\)/g, "").trim();
-  if (!source) return new Set();
-
-  const parts = source
-    .split(/\s*(?:,|，|;|\/|·|및|등|외)\s*/u)
-    .map((part) => part.replace(/^[\[\]()]+|[\[\]()]+$/g, "").trim())
-    .filter(Boolean);
-  const expanded = new Set();
-  let prefix = "";
-
-  for (const part of parts) {
-    const full = parseProviderCaseNumber(part);
-    if (full) {
-      prefix = `${full.year}${full.typeCode}`;
-      expanded.add(full.caseNumber);
-      continue;
-    }
-    const abbreviated = part.match(/^\d{1,7}$/u);
-    if (abbreviated && prefix) expanded.add(`${prefix}${abbreviated[0]}`);
-  }
-
-  return expanded;
-}
-
-export function canonicalCaseIdentity(value) {
-  const members = [...expandProviderCaseNumberSet(value)].filter(Boolean).sort();
-  if (members.length > 0) return members.join("|");
-  return normalizeProviderCaseText(value);
-}
-
-export function canonicalCaseNumber(value) {
-  const members = [...expandProviderCaseNumberSet(value)].filter(Boolean).sort();
-  return members.length > 0 ? members.join(",") : normalizeProviderCaseText(value);
-}
-
-export function caseIdentityMatches(left, right) {
-  const leftIdentity = canonicalCaseIdentity(left);
-  const rightIdentity = canonicalCaseIdentity(right);
-  return Boolean(leftIdentity && rightIdentity && leftIdentity === rightIdentity);
-}
+export {
+  canonicalCaseIdentity,
+  canonicalCaseNumber,
+  caseIdentityMatches,
+  expandCaseIdentitySet as expandProviderCaseNumberSet,
+  parseCaseIdentity as parseProviderCaseNumber,
+};
 
 export function evidenceProgressSnapshot(ledger) {
   if (typeof ledger?.progressSnapshot === "function") return ledger.progressSnapshot();

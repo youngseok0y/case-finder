@@ -23,24 +23,67 @@ server.on("error", (error) => {
 const isMainModule = process.argv[1]
   && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
-if (isMainModule) {
-  process.on("SIGINT", () => {
-    server.close(async () => {
-      closeDefaultCodexAccountManager();
-      await closeDefaultCodexAppServerRuntime();
-      await closeMcp();
-      process.exit(0);
-    });
+function closeHttpServer(server, graceMs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve();
+    };
+    timer = setTimeout(() => {
+      server.closeAllConnections?.();
+      finish();
+    }, graceMs);
+    try {
+      server.close(finish);
+      server.closeIdleConnections?.();
+    } catch {
+      finish();
+    }
   });
+}
 
-  process.on("SIGTERM", () => {
-    server.close(async () => {
-      closeDefaultCodexAccountManager();
-      await closeDefaultCodexAppServerRuntime();
-      await closeMcp();
-      process.exit(0);
+export function createGracefulShutdown({
+  server: targetServer,
+  closeAccountManager = closeDefaultCodexAccountManager,
+  closeRuntime = closeDefaultCodexAppServerRuntime,
+  closeLegalMcp = closeMcp,
+  graceMs = 10_000,
+} = {}) {
+  const gracePeriod = Math.max(0, Number(graceMs) || 0);
+  let shutdownPromise = null;
+  return () => {
+    if (shutdownPromise) return shutdownPromise;
+    shutdownPromise = (async () => {
+      await closeHttpServer(targetServer, gracePeriod);
+      for (const closeResource of [closeAccountManager, closeRuntime, closeLegalMcp]) {
+        try {
+          await closeResource();
+        } catch (error) {
+          await logError("종료 중 리소스 정리 실패", error);
+        }
+      }
+    })();
+    return shutdownPromise;
+  };
+}
+
+if (isMainModule) {
+  const shutdown = createGracefulShutdown({ server });
+  let exitRequested = false;
+  const handleSignal = () => {
+    if (exitRequested) return;
+    exitRequested = true;
+    void shutdown().then(() => process.exit(0)).catch(async (error) => {
+      await logError("종료 처리 실패", error);
+      process.exit(1);
     });
-  });
+  };
+  process.on("SIGINT", handleSignal);
+  process.on("SIGTERM", handleSignal);
 
   try {
     await startMcp({ probe: true });

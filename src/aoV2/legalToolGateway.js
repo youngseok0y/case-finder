@@ -1,6 +1,13 @@
 import { config } from "../../config.js";
 import { callTool as defaultCallTool } from "../mcpClient.js";
 import { parseDecisionDetail, parseDecisionSearchResults, parseLawSearchResults, toolText } from "../legalMcpParser.js";
+import {
+  classifyLegalResult,
+  isCompletedLegalSearch,
+  isLegalResultError,
+  LEGAL_RESULT_CATEGORIES,
+} from "../legalResultClassifier.js";
+import { text } from "../text.js";
 import { createEvidenceLedger } from "./evidenceLedger.js";
 import { createSafetyController } from "./safety.js";
 import { createTelemetry } from "./telemetry.js";
@@ -9,10 +16,6 @@ import { createLegalDynamicTools, LEGAL_TOOL_NAMES } from "./legalToolDefinition
 export { LEGAL_TOOL_NAMES } from "./legalToolDefinitions.js";
 
 const DECISION_DOMAINS = new Set(["precedent", "constitutional", "admin_appeal"]);
-
-function text(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 function integerOr(value, fallback, minimum, maximum) {
   const number = Number.isInteger(value) ? value : fallback;
@@ -28,34 +31,19 @@ function errorResult(code, message, details = {}) {
   };
 }
 
-function isSearchTool(name) {
-  return name === "search_decisions" || name === "search_law";
-}
-
-function hasExplicitSearchPayload(raw) {
-  return Boolean(
-    Array.isArray(raw?.items)
-    || Array.isArray(raw?.results)
-    || Array.isArray(raw?.structuredContent?.items)
-    || Array.isArray(raw?.structuredContent?.results)
-    || Number.isInteger(raw?.total),
-  );
-}
-
 function normalizeToolState(name, raw, rawText, parsedItems = false) {
-  const notFound = rawText.includes("[NOT_FOUND]");
-  const hallucinationDetected = rawText.includes("[HALLUCINATION_DETECTED]");
-  const isError = Boolean(raw?.isError) || notFound || hallucinationDetected;
-  const hasSearchEvidence = notFound || hasExplicitSearchPayload(raw) || parsedItems;
-  const searchCompleted = isSearchTool(name)
-    && hasSearchEvidence
-    && !hallucinationDetected
-    && (!raw?.isError || notFound);
-  return { isError, notFound, hallucinationDetected, searchCompleted };
+  const category = classifyLegalResult(raw, { toolName: name, rawText, parsedItems });
+  return {
+    category,
+    isError: isLegalResultError(category),
+    notFound: category === LEGAL_RESULT_CATEGORIES.NOT_FOUND,
+    hallucinationDetected: category === LEGAL_RESULT_CATEGORIES.HALLUCINATION,
+    searchCompleted: (name === "search_decisions" || name === "search_law") && isCompletedLegalSearch(category),
+  };
 }
 
 export function normalizeLegalToolResult(name, raw) {
-  const rawText = toolText(raw);
+  const rawText = toolText(raw) || (typeof raw?.rawText === "string" ? raw.rawText : "");
   if (name === "search_decisions") {
     const items = parseDecisionSearchResults(rawText).map((item) => ({
       id: item.id,

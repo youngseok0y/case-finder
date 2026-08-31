@@ -3,7 +3,7 @@ await (async () => {
   const assert = (await import("node:assert/strict")).default;
   const test = (await import("node:test")).default;
   const { config } = await import("../../config.js");
-  const { ADMIN_SETTING_KEYS, validateAdminPatch } = await import("../../src/adminConfig.js");
+  const { ADMIN_SETTING_KEYS, adminSettingsView, validateAdminPatch } = await import("../../src/adminConfig.js");
   const {
   createSearchAdapterRegistry,
   GEMINI_D_EXECUTION_PIN,
@@ -13,8 +13,15 @@ await (async () => {
   toResultContract,
 } = await import("../../src/searchAdapters/index.js");
   const { validateNaturalResult } = await import("../../src/validator.js");
+  const { SEARCH_ADAPTER_CATALOG, getSearchAdapterDefinition } = await import("../../src/searchAdapters/catalog.js");
   test("product adapter registry and search configuration are frozen", () => {
     assert.deepEqual(SEARCH_ADAPTER_IDS, ["gemini_d", "luna_native"]);
+    assert.deepEqual(SEARCH_ADAPTER_CATALOG.map(({ id, label, stage }) => ({ id, label, stage })), [
+      { id: "gemini_d", label: "Gemini 빠른 검색", stage: "GEMINI_D" },
+      { id: "luna_native", label: "Luna 고정밀 검색", stage: "LUNA_NATIVE" },
+    ]);
+    assert.deepEqual(adminSettingsView().adapterOptions, SEARCH_ADAPTER_CATALOG.map(({ id, label }) => ({ id, label })));
+    assert.equal(getSearchAdapterDefinition("luna_native").stage, "LUNA_NATIVE");
     assert.deepEqual(createSearchAdapterRegistry({ adapters: {
       gemini_d: { runNaturalQuery: async () => ({}) },
       luna_native: { runNaturalQuery: async () => ({}) },
@@ -66,7 +73,7 @@ await (async () => {
 await (async () => {
   const assert = (await import("node:assert/strict")).default;
   const test = (await import("node:test")).default;
-  const { decisionDetailLink, lawDetailLink } = await import("../../src/directLookup.js");
+  const { decisionDetailLink, lawDetailLink, sanitizeApiLink } = await import("../../src/directLookup.js");
   const { renderResults } = await import("../../src/renderer.js");
   const { createGeminiDAdapter, createLunaNativeAdapter, toResultContract } = await import("../../src/searchAdapters/index.js");
   const { validateNaturalResult } = await import("../../src/validator.js");
@@ -117,6 +124,9 @@ await (async () => {
 
   test("provider links and empty/failure terminal contracts remain honest", () => {
     assert.equal(decisionDetailLink("precedent", "614471"), "https://www.law.go.kr/LSW/precInfoP.do?precSeq=614471");
+    assert.equal(decisionDetailLink("constitutional", "614472"), "https://www.law.go.kr/LSW/detcInfoP.do?detcSeq=614472");
+    assert.equal(decisionDetailLink("admin_appeal", "614473"), "https://www.law.go.kr/LSW/deccInfoP.do?deccSeq=614473");
+    assert.equal(sanitizeApiLink("https://www.law.go.kr/DRF/lawService.do?target=decc&ID=614473"), "https://www.law.go.kr/LSW/deccInfoP.do?deccSeq=614473");
     assert.equal(lawDetailLink("284415"), "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=284415");
     assert.equal(toResultContract({ query: "empty", selected: [], items: [], candidateCaseNumbers: [] }, {
       adapterId: "gemini_d", provider: "gemini", architecture: "D",
@@ -124,5 +134,31 @@ await (async () => {
     assert.equal(toResultContract({ query: "failure", error: "provider unavailable", selected: [], items: [], candidateCaseNumbers: [] }, {
       adapterId: "luna_native", provider: "codex_luna", architecture: "AO_V2_NATIVE",
     }).terminalState, "SEARCH_FAILED");
+  });
+
+  test("Luna verified administrative-appeal items use the safe user-facing detail link", async () => {
+    const { buildLunaResultItems } = await import("../../src/searchAdapters/lunaNativeAdapter.js");
+    const adminCase = {
+      id: "614473",
+      domain: "admin_appeal",
+      caseNumber: "2024행심123",
+      rawCaseNumber: "2024행심123",
+      title: "행정심판 fixture",
+      court: "중앙행정심판위원회",
+      date: "2024. 1. 1.",
+      detailVerified: true,
+      rawText: "provider administrative appeal text",
+    };
+    const items = buildLunaResultItems({ selected: [{ case_no: adminCase.caseNumber, match: "direct" }] }, {
+      getCase: () => adminCase,
+      getDetailText: () => adminCase.rawText,
+    });
+    assert.equal(items[0].link, decisionDetailLink("admin_appeal", adminCase.id));
+    assert.match(renderResults({
+      terminalState: "SUCCESS",
+      query: "행정심판 fixture",
+      items,
+      lawReferences: [],
+    }), /\/LSW\/deccInfoP\.do\?deccSeq=614473/u);
   });
 })();

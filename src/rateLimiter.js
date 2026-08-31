@@ -33,11 +33,44 @@ function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function abortedError() {
+  const error = new Error("Gemini 호출이 취소되었습니다.");
+  error.code = "ABORTED";
+  return error;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw abortedError();
+}
+
+function waitWithAbort(wait, milliseconds, signal) {
+  if (!signal) return wait(milliseconds);
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    let abortHandler;
+    const cleanup = () => signal.removeEventListener("abort", abortHandler);
+    abortHandler = () => {
+      cleanup();
+      reject(abortedError());
+    };
+    signal.addEventListener("abort", abortHandler, { once: true });
+    Promise.resolve(wait(milliseconds)).then(
+      () => {
+        cleanup();
+        resolve();
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
 export function createGeminiRateLimiter(options = {}) {
   const statePath = options.usageFilePath || usagePath;
   const rpmLimit = Number.isInteger(options.rpmLimit) ? options.rpmLimit : config.geminiRpmLimit;
   const rpdLimit = Number.isInteger(options.rpdLimit) ? options.rpdLimit : config.geminiRpdLimit;
-  const questionLimit = Number.isInteger(options.questionLimit) ? options.questionLimit : 2;
   const rpmWindowMs = Number.isInteger(options.rpmWindowMs) ? options.rpmWindowMs : RPM_WINDOW_MS;
   const rpmWaitMarginMs = Number.isInteger(options.rpmWaitMarginMs)
     ? options.rpmWaitMarginMs
@@ -74,28 +107,17 @@ export function createGeminiRateLimiter(options = {}) {
   }
 
   async function reserve(now = clock(), reserveOptions = {}) {
+    const abortSignal = reserveOptions.abortSignal || null;
     let waitEvents = 0;
     let waitTotalMs = 0;
     while (true) {
+      throwIfAborted(abortSignal);
       const currentNow = waitEvents === 0 ? now : clock();
       const decision = await withWriteLock(async () => {
+        throwIfAborted(abortSignal);
         const usage = await readState(currentNow);
         const recentCalls = usage.recentCalls.filter((timestamp) => timestamp > currentNow - rpmWindowMs);
-        const reserve = Number.isInteger(reserveOptions.rpdReserve)
-          ? Math.min(rpdLimit, Math.max(0, reserveOptions.rpdReserve))
-          : 0;
-        const dailyLimit = rpdLimit - reserve;
-        if (usage.callsToday >= dailyLimit) {
-          throw new GeminiLimitExceededError(reserve > 0 ? "일일 reserve" : "일일 한도");
-        }
-        const effectiveQuestionLimit = Number.isInteger(reserveOptions.questionLimit)
-          ? reserveOptions.questionLimit
-          : questionLimit;
-        if (reserveOptions.enforceQuestionLimit !== false
-          && Number.isInteger(reserveOptions.questionCalls)
-          && reserveOptions.questionCalls >= effectiveQuestionLimit) {
-          throw new GeminiLimitExceededError("질문당 한도");
-        }
+        if (usage.callsToday >= rpdLimit) throw new GeminiLimitExceededError("일일 한도");
         if (recentCalls.length >= rpmLimit) {
           const oldestCall = Math.min(...recentCalls);
           return {
@@ -108,6 +130,7 @@ export function createGeminiRateLimiter(options = {}) {
           callsToday: usage.callsToday + 1,
           recentCalls: [...recentCalls, currentNow],
         };
+        throwIfAborted(abortSignal);
         await writeState(nextUsage);
         return { waiting: false, usage: nextUsage };
       });
@@ -122,7 +145,7 @@ export function createGeminiRateLimiter(options = {}) {
 
       waitEvents += 1;
       waitTotalMs += decision.waitMs;
-      await wait(decision.waitMs);
+      await waitWithAbort(wait, decision.waitMs, abortSignal);
     }
   }
 

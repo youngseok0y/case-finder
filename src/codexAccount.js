@@ -1,10 +1,7 @@
 import { getDefaultCodexAppServerRuntime } from "./codexAppServerRuntime.js";
+import { text } from "./text.js";
 
 const LOGIN_TYPES = new Set(["chatgpt", "chatgptDeviceCode"]);
-
-function text(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 function numberOrNull(value) {
   const number = Number(value);
@@ -16,6 +13,7 @@ const PREFERRED_WINDOW_DURATION_MINS = Object.freeze({
   weekly: 10_080,
   monthly: 43_200,
 });
+const DEFAULT_ACCOUNT_CACHE_TTL_MS = 5_000;
 
 function emptyCodexQuota() {
   return {
@@ -48,6 +46,16 @@ function quotaPublicView(value) {
 }
 
 function resetMilliseconds(value) {
+  if (typeof value === "string") {
+    const source = value.trim();
+    if (!source) return null;
+    const number = numberOrNull(source);
+    if (number !== null) return number > 0
+      ? (number >= 1_000_000_000_000 ? number : number * 1_000)
+      : null;
+    const parsed = Date.parse(source);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
   const number = numberOrNull(value);
   if (number === null || number <= 0) return null;
   return number >= 1_000_000_000_000 ? number : number * 1_000;
@@ -237,19 +245,28 @@ function loginValue(result, type) {
 }
 
 export class CodexAccountManager {
-  constructor({ runtime = getDefaultCodexAppServerRuntime() } = {}) {
+  constructor({
+    runtime = getDefaultCodexAppServerRuntime(),
+    cacheTtlMs = DEFAULT_ACCOUNT_CACHE_TTL_MS,
+    now = () => Date.now(),
+  } = {}) {
     this.runtime = runtime;
+    this.cacheTtlMs = Math.max(0, Number(cacheTtlMs) || 0);
+    this.now = typeof now === "function" ? now : () => Date.now();
     this.account = accountValue({ requiresOpenaiAuth: true });
     this.rateLimits = { source: "app_server", limits: {} };
     this.codexQuota = emptyCodexQuota();
     this.pendingLoginId = "";
     this.refreshPromise = null;
+    this.cacheUpdatedAt = null;
+    this.accountLoaded = false;
     this.unsubscribe = runtime.onNotification((message) => this.#handleNotification(message));
   }
 
   async #readAccount() {
     const result = await this.runtime.request("account/read", {}, { allowRestart: true });
     this.account = accountValue(result || {});
+    this.accountLoaded = true;
   }
 
   async #readRateLimits() {
@@ -262,9 +279,19 @@ export class CodexAccountManager {
     this.account = accountValue({ requiresOpenaiAuth: true });
     this.rateLimits = { source: "app_server", limits: {} };
     this.codexQuota = emptyCodexQuota();
+    this.cacheUpdatedAt = null;
+    this.accountLoaded = false;
   }
 
-  async refresh() {
+  #cacheIsFresh() {
+    return this.cacheTtlMs > 0
+      && this.accountLoaded
+      && this.cacheUpdatedAt !== null
+      && this.now() - this.cacheUpdatedAt < this.cacheTtlMs;
+  }
+
+  async refresh({ force = false } = {}) {
+    if (!force && this.#cacheIsFresh()) return this.snapshot();
     if (this.refreshPromise) return this.refreshPromise;
     this.refreshPromise = (async () => {
       await this.#readAccount();
@@ -274,6 +301,7 @@ export class CodexAccountManager {
         this.rateLimits = { source: "app_server", limits: {} };
         this.codexQuota = emptyCodexQuota();
       }
+      this.cacheUpdatedAt = this.now();
       return this.snapshot();
     })().finally(() => {
       this.refreshPromise = null;
@@ -313,18 +341,12 @@ export class CodexAccountManager {
   async logout() {
     await this.runtime.request("account/logout", {}, { allowRestart: true });
     this.pendingLoginId = "";
-    this.account = accountValue({ requiresOpenaiAuth: true });
+    this.#clearAccountCache();
     return { ...this.account };
   }
 
   async readRateLimits() {
-    try {
-      await this.#readRateLimits();
-    } catch (error) {
-      this.rateLimits = { source: "app_server", limits: {} };
-      this.codexQuota = emptyCodexQuota();
-      throw error;
-    }
+    if (!this.#cacheIsFresh()) await this.refresh();
     return { source: "app_server", codexQuota: quotaPublicView(this.codexQuota) };
   }
 
@@ -345,6 +367,7 @@ export class CodexAccountManager {
     if (message?.method === "account/rateLimits/updated") {
       this.rateLimits = rateLimitValue(message.params || {});
       this.codexQuota = normalizeCodexQuota(message.params || {});
+      if (this.accountLoaded) this.cacheUpdatedAt = this.now();
       return;
     }
     if (!["account/updated", "account/login/completed"].includes(message?.method)) return;

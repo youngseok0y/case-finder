@@ -2,7 +2,9 @@
 await (async () => {
   const assert = (await import("node:assert/strict")).default;
   const { EventEmitter } = await import("node:events");
+  const fs = await import("node:fs/promises");
   const http = (await import("node:http")).default;
+  const os = await import("node:os");
   const { PassThrough, Writable } = await import("node:stream");
   const { spawnSync } = await import("node:child_process");
   const test = (await import("node:test")).default;
@@ -13,9 +15,12 @@ await (async () => {
   createAppServerClient,
 } = await import("../../src/codexAppServerClient.js");
   const { createAgenticSearchV2 } = await import("../../src/aoV2/index.js");
+  const { createGeminiDAdapter } = await import("../../src/searchAdapters/geminiDAdapter.js");
+  const { runDeterministicPipeline } = await import("../../src/nlPipeline.js");
   const { withMcpTimeout } = await import("../../src/mcpClient.js");
   const { sanitizeLogValue } = await import("../../src/log.js");
-  const { createRequestHandler } = await import("../../src/server.js");
+  const { waitForHealth } = await import("../../src/verifyManagedRuntime.js");
+  const { createGracefulShutdown, createRequestHandler } = await import("../../src/server.js");
   const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
   class FakeChild extends EventEmitter {
@@ -117,11 +122,114 @@ await (async () => {
     }
   });
 
+  test("chunked oversized request returns a JSON 413 after draining the body", async () => {
+    const server = http.createServer(createRequestHandler());
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+    try {
+      const response = await new Promise((resolve, reject) => {
+        const request = http.request({
+          host: "127.0.0.1",
+          port,
+          path: "/ask",
+          method: "POST",
+          headers: {
+            host: `127.0.0.1:${port}`,
+            origin: `http://127.0.0.1:${port}`,
+            "content-type": "application/json",
+          },
+        }, (incoming) => {
+          const chunks = [];
+          incoming.on("data", (chunk) => chunks.push(chunk));
+          incoming.on("end", () => resolve({ statusCode: incoming.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+        });
+        request.on("error", reject);
+        request.write("x".repeat(6_000));
+        request.end("x".repeat(6_000));
+      });
+      assert.equal(response.statusCode, 413);
+      assert.deepEqual(JSON.parse(response.body), {
+        ok: false,
+        terminalState: "SEARCH_FAILED",
+        message: "Request body is too large.",
+      });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test("graceful shutdown is idempotent and bounds an active request", async () => {
+    let requestReceived;
+    const received = new Promise((resolve) => { requestReceived = resolve; });
+    const server = http.createServer(() => requestReceived());
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+    const request = http.request({ host: "127.0.0.1", port, path: "/hold" });
+    request.on("error", () => {});
+    request.end();
+    await received;
+
+    const closed = [];
+    const shutdown = createGracefulShutdown({
+      server,
+      graceMs: 20,
+      closeAccountManager: () => { closed.push("account"); },
+      closeRuntime: async () => { closed.push("runtime"); },
+      closeLegalMcp: async () => { closed.push("mcp"); },
+    });
+    const first = shutdown();
+    const second = shutdown();
+    assert.strictEqual(first, second);
+    await first;
+    assert.deepEqual(closed, ["account", "runtime", "mcp"]);
+  });
+
   test("MCP timeout wrapper observes abort signals", async () => {
     const controller = new AbortController();
     const pending = withMcpTimeout(new Promise(() => {}), 1_000, controller.signal);
     controller.abort();
     await assert.rejects(pending, (error) => error.code === "ABORTED");
+  });
+
+  test("Gemini adapter abort stops the pipeline before later MCP work", async () => {
+    const controller = new AbortController();
+    let collectCalls = 0;
+    const adapter = createGeminiDAdapter({
+      run: (query, dependencies) => runDeterministicPipeline(query, {
+        ...dependencies,
+        generatePlan: async () => {
+          dependencies.onProgress("ANALYSIS_COMPLETE");
+          return {
+            queries: [
+              { query: "anchor one", domain: "precedent", kind: "anchor" },
+              { query: "anchor two", domain: "precedent", kind: "anchor" },
+              { query: "support one", domain: "precedent", kind: "support" },
+              { query: "support two", domain: "precedent", kind: "support" },
+            ],
+            law_names: [],
+          };
+        },
+        collectCandidates: async () => {
+          collectCalls += 1;
+          return [];
+        },
+        searchRelatedLaws: async () => [],
+        lookupQueryLawReferences: async () => [],
+        prepareCandidates: async () => ({ candidatesWithPreview: [] }),
+        selectCandidates: async () => ({ support: "none", selected: [], intro: "" }),
+      }),
+    });
+
+    await assert.rejects(
+      adapter.runNaturalQuery("abort fixture", {
+        abortSignal: controller.signal,
+        onProgress: (event) => {
+          if (event === "ANALYSIS_COMPLETE") controller.abort();
+        },
+      }),
+      (error) => error.code === "ABORTED",
+    );
+    assert.equal(collectCalls, 0);
   });
 
   test("error and validation log values redact credentials and tokens", () => {
@@ -137,6 +245,62 @@ await (async () => {
     });
     assert.notEqual(result.status, 0);
     assert.match(`${result.stdout}\n${result.stderr}`, /missing required --stage/iu);
+  });
+
+  test("managed health retries a 200 response with invalid JSON", async () => {
+    let requestCount = 0;
+    const health = await waitForHealth(3311, { exitCode: null }, {
+      fetchImpl: async () => {
+        requestCount += 1;
+        return {
+          status: 200,
+          json: async () => {
+            if (requestCount === 1) throw new SyntaxError("invalid health JSON");
+            return { service: "case-finder", ok: true };
+          },
+        };
+      },
+      sleep: async () => {},
+    });
+    assert.deepEqual(health, { service: "case-finder", ok: true });
+    assert.equal(requestCount, 2);
+  });
+
+  test("packaging prune has only non-empty levels and fails closed for missing targets", async () => {
+    const source = await fs.readFile(path.join(ROOT, "packaging", "prune-staging.mjs"), "utf8");
+    assert.doesNotMatch(source, /\b\d+\s*:\s*\[\s*\]/u);
+
+    const stageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "case-finder-prune-"));
+    try {
+      const missing = spawnSync(process.execPath, [
+        path.join(ROOT, "packaging", "prune-staging.mjs"),
+        "--stage",
+        stageRoot,
+        "--level",
+        "1",
+      ], { cwd: ROOT, encoding: "utf8" });
+      assert.notEqual(missing.status, 0);
+      assert.match(`${missing.stdout}\n${missing.stderr}`, /expected prune target is missing/iu);
+
+      for (const relativePath of [
+        "node_modules/sharp",
+        "node_modules/@img/colour",
+        "node_modules/@img/sharp-win32-x64",
+      ]) {
+        await fs.mkdir(path.join(stageRoot, relativePath), { recursive: true });
+      }
+      const pruned = spawnSync(process.execPath, [
+        path.join(ROOT, "packaging", "prune-staging.mjs"),
+        "--stage",
+        stageRoot,
+        "--level",
+        "4",
+      ], { cwd: ROOT, encoding: "utf8" });
+      assert.equal(pruned.status, 0, `${pruned.stdout}\n${pruned.stderr}`);
+      assert.match(pruned.stdout, /"level": 4/iu);
+    } finally {
+      await fs.rm(stageRoot, { recursive: true, force: true });
+    }
   });
 })();
 
