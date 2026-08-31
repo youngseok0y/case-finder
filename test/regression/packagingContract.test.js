@@ -35,6 +35,31 @@ await (async () => {
     assert.match(source, /Join-Path \$env:APP_ROOT 'src\\server\.js'/iu);
     assert.match(source, /PORT must contain only digits/iu);
     assert.match(source, /%%~B/iu);
+    assert.match(source, /case-finder\.ico/iu);
+  });
+
+  test("Windows launcher icon is a valid multi-resolution ICO resource", async () => {
+    const icon = await fs.readFile(path.join(ROOT, "case-finder.ico"));
+    assert.equal(icon.readUInt16LE(0), 0);
+    assert.equal(icon.readUInt16LE(2), 1);
+    const count = icon.readUInt16LE(4);
+    assert.equal(count, 7);
+
+    const sizes = [];
+    for (let index = 0; index < count; index += 1) {
+      const entry = 6 + (index * 16);
+      const size = icon[entry] || 256;
+      const height = icon[entry + 1] || 256;
+      const bytes = icon.readUInt32LE(entry + 8);
+      const offset = icon.readUInt32LE(entry + 12);
+      sizes.push(size);
+      assert.equal(height, size);
+      assert.equal(icon.readUInt16LE(entry + 4), 1);
+      assert.equal(icon.readUInt16LE(entry + 6), 32);
+      assert.ok(offset + bytes <= icon.length);
+      assert.deepEqual([...icon.subarray(offset, offset + 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+    }
+    assert.deepEqual(sizes, [16, 24, 32, 48, 64, 128, 256]);
   });
 
   test("runtime manifest includes every live prompt and public resource read", async () => {
@@ -62,6 +87,7 @@ await (async () => {
       "app/package-lock.json",
       "runtime/node/node.exe",
       "start.bat",
+      "case-finder.ico",
     ]) {
       assert.equal(included(resource), true, "runtime manifest is missing " + resource);
     }

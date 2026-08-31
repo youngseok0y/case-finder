@@ -56,7 +56,7 @@ The payload includes:
 - production dependencies installed into `app/node_modules/`;
 - `prompts/plan.txt` and `prompts/select.txt`;
 - `config.js`, `package.json`, and `package-lock.json`;
-- `.env.example` and `start.bat`;
+- `.env.example`, `start.bat`, and `case-finder.ico`;
 - managed Node at `runtime/node/node.exe`.
 
 The payload excludes:
@@ -70,6 +70,10 @@ The payload excludes:
 
 The verification reports in `docs/reports/` are repository evidence, not
 product runtime resources.
+
+`start.bat` cannot embed a custom Windows icon because batch files do not carry
+icon resources. The installer or a Windows shortcut targeting `start.bat` must
+use the adjacent `case-finder.ico` as its icon location.
 
 ## 5. Dependency installation and prune
 

@@ -38,7 +38,8 @@
     "app/package-lock.json",
     "runtime/node/node.exe",
     ".env.example",
-    "start.bat"
+    "start.bat",
+    "case-finder.ico"
   ],
   "exclude": [
     ".git/",
