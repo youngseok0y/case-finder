@@ -49,3 +49,11 @@ Case Finder는 `.env` 파일을 직접 편집할 필요 없이, 관리 설정 �
 Luna 고정밀 검색을 처음 사용할 때는 Codex 로그인이 필요해요. 인증을 완료하면 이후부터는 Case Finder에서 Luna 고정밀 검색을 바로 사용할 수 있어요.
 
 이 인증은 Case Finder 전용 인증 영역(관리 설정 창)에서 이루어져요.
+
+## 기술 문서
+
+프로젝트 구조와 개발·배포 방법은 `docs/`의 기술 문서를 참고하세요.
+
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) — 시스템 구조와 핵심 계약
+- [DEVELOPMENT.md](docs/DEVELOPMENT.md) — 개발·수정·테스트 방법
+- [PACKAGING.md](docs/PACKAGING.md) — Windows 배포 payload와 acceptance 절차

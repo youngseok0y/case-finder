@@ -1,17 +1,20 @@
 # Case Finder Final Pre-Packaging Hardening Report
 
-Date: 2026-08-28
-Branch: `fix/final-prepackage-hardening`
-HEAD: `79bfd92 fix: finalize runtime lifecycle and efficiency`
-Baseline main: `df4de46 refactor: consolidate final test suite`
+Date: 2026-08-31
+Branch: `release`
+HEAD: `8def672 Merge main into release`
+Baseline main: `e41b6f6 Merge branch 'fix/final-prepackage-hardening'`
 
 ## Baseline
 
 The hardening work was performed on the isolated branch above. The source
 checkout uses Node `v24.19.0` and npm `11.17.0`, within the configured Node
-range `>=24.14.0 <25`. The only pre-existing untracked file is the user-owned
+range `>=24.14.0 <25`. The acceptance run provisioned the pinned private Node
+`v24.14.0` under `runtime/node/node.exe` from the official Windows x64 archive
+after SHA-256 verification. The only pre-existing untracked file is the user-owned
 handoff document `docs/Case Finder — Final Pre-Packaging Hardening Handoff.md`;
-it was preserved and was not staged.
+it was preserved and was not staged. The private Node binary is an ignored
+build artifact and was not staged.
 
 The Phase 8 audit added only this report and the closure matrix. No production
 code, prompt, model, ranking, adapter, dependency manifest, or packaging
@@ -152,89 +155,91 @@ No package manifest or lockfile change was made by Phase 8.
 
 ## Managed-runtime result
 
-`npm run verify:managed -- --skip-query` is BLOCKED with:
+`npm run verify:managed -- --install-root <staging> --skip-query` passed with:
 
 ```text
-M11_CODEX_APP_SERVER_BLOCKED
-MANAGED_FILE_MISSING: managed node:...\runtime\node\node.exe
+M11_CODEX_APP_SERVER_PASS
+nodeVersion: v24.14.0
+dynamicTools: true
+mcpConnected: true
 ```
 
-The source checkout has no packaged private Node runtime, so managed app-server
-capability verification and managed golden query cannot be declared PASS.
+The temporary staging payload used `runtime/node/node.exe` as the server
+launcher. Codex app-server `0.147.0`, dynamic tools, health, and MCP startup
+all passed. The staging payload did not include system Node/npm on its runtime
+PATH.
 
 ## Gemini live smoke
 
-Three natural-language requests were attempted once each with `gemini_d`.
-The server health endpoint was available and MCP transport reported connected,
-but all three requests returned HTTP 200 with `GEMINI_D`, terminal state
-`SEARCH_FAILED`, and zero items. Each recorded one Gemini request and one MCP
-call. The contemporaneous server log recorded `M0 MCP probe failed`.
+Three representative natural-language requests were run once each through the
+staging payload and managed Node:
 
-This is a live gate FAIL, not a verified-only success. No additional Gemini
-retry was made.
+| query shape | status | terminal state | items | result condition |
+| --- | ---: | --- | ---: | --- |
+| 임차보증금 반환 | 200 | `SUCCESS` | 2 | verified-only |
+| 계약 해지 손해배상 | 200 | `SUCCESS` | 3 | verified-only |
+| `임대차 계약 해지 손해배상 $100` | 200 | `NO_RESULT` | 0 | no forced fill |
+
+Gemini live smoke is `3/3` process-successful with no unsupported output.
 
 ## Luna live smoke
 
-The dedicated `state/codex-home/auth.json` exists and the dedicated config
-uses `cli_auth_credentials_store = "file"`; no global Codex home was used.
-The three planned natural-language requests did not produce verified results:
-the App Server reported `CODEX_APP_SERVER_TURN_FAILED: turn status: failed`.
-An additional one-request diagnostic was run only to recover the missing first
-run output and also failed; it was not counted as a pass or used to justify a
-fallback. No Gemini fallback was introduced.
-
-This is a live gate FAIL.
+The dedicated `state/codex-home` authentication was used only in the temporary
+staging state. Three requests ran once through one persistent staging server;
+the first two were back-to-back. All returned HTTP 200 with `LUNA_NATIVE`,
+`SUCCESS`, and four verified-only items. No global Codex home was used and no
+Gemini fallback was introduced.
 
 ## Direct-route smoke
 
-Three one-shot source-checkout requests were used to inspect routing:
+Three one-shot staging requests were used to inspect routing and provider
+identity:
 
 | input class | observed route | provider result |
 | --- | --- | --- |
-| `99두2963` | `DIRECT` | `SEARCH_FAILED`, zero items |
-| modern four-digit case | `DIRECT` | `SEARCH_FAILED`, zero items |
-| compound/historical identifier | `natural` because the input contained multiple identifiers | `SEARCH_FAILED`, zero items |
+| `99두2963` | `DIRECT` | HTTP 200, one verified item |
+| `2023두54914` | `DIRECT` | HTTP 200, one verified item |
+| `2014두12598, 12604` | `DIRECT` | HTTP 200, one verified item |
 
-The route classification itself showed no regression, but legal-provider
-verification was unavailable under the same MCP probe failure. Therefore the
-direct-route live gate is not PASS.
+All three used the managed Node launcher and preserved the provider-verified
+direct result contract.
 
 ## Packaging staging dry-run
 
-Manifest preflight passed for live resource declarations, absence of
-`refine-plan.txt`, adapter/dependency metadata, and required source/prompt
-paths. The prune fixture and packaging contract tests passed.
+The staging dry-run completed outside the source checkout:
 
-A complete staging copy → prune → managed-resource validation could not run
-because `runtime/node/node.exe` is absent from the source checkout. No final
-installer was built.
+- clean `npm ci`: 194 packages installed
+- prune: six declared dependency targets removed
+- manifest include preflight: all paths present
+- forbidden payload paths: `.env`, docs, tests, `runtime/codex`, and
+  `refine-plan.txt` absent
+- managed Node: `v24.14.0`
+- installer: not built by design
+
+The temporary staging directory was removed after verification.
 
 ## Remaining known issues
 
-1. Provision the managed private Node runtime under `runtime/node/node.exe` and
-   repeat managed health/capability verification.
-2. Repair or provision the legal MCP live credential/service path so the M0
-   probe succeeds, then repeat the three Gemini, three Luna, and direct-route
-   smoke gates with retry count zero.
-3. Complete the packaging staging dry-run only after the managed runtime and
-   live gates pass.
+1. Build the installer in the separate installer phase; this acceptance run
+   intentionally stopped before NSIS/installer construction.
+2. The private Node binary must be provisioned by the future packaging build
+   rather than committed to Git.
 
 These are release-gate dependencies, not new production-code findings. No
 additional tuning or refactoring was performed.
 
 ## Production freeze recommendation
 
-Keep production source code frozen at `79bfd92` while the external runtime and
-provider prerequisites are repaired. Do not begin installer construction from
-this audit result alone.
+Keep production source code frozen at the accepted main merge. Only the
+separate installer/build phase remains after this pre-package gate.
 
 ## Decision
 
 ```text
-FINAL_PREPACKAGE_HARDENING_PENDING
+FINAL_PREPACKAGE_HARDENING_PASS
 ```
 
-The 41 finding closure is complete and deterministic verification is green,
-but the final acceptance token `FINAL_PREPACKAGE_HARDENING_PASS` is not
-declared because managed runtime, live provider, direct-route verification,
-and complete packaging staging are not all passing.
+The 41 finding closure is complete. Deterministic verification, 100/100/100
+coverage, zero high-severity production audit findings, managed runtime,
+staging validation, Gemini smoke, Luna smoke, and direct-route smoke all pass.
+Installer construction remains intentionally outside this pre-package gate.
