@@ -251,8 +251,12 @@ report archive were published to both release lines:
 
 - `main` documentation commit: `64d24a3`
 - `release` documentation merge commit: `9cf3c9e`
+- final `release` README alignment commit: `ddc13b2`
+
+At the start of this final report metadata update, the branch tips were
+`main=8da83c8` and `release=ddc13b2`.
 
 These references identify the commits that introduced the synchronized
-technical documents and `docs/reports/` layout. This metadata update is
-recorded separately and does not change the acceptance decision or production
-code.
+technical documents, `docs/reports/` layout, and final README parity. This
+metadata update is recorded separately and does not change the acceptance
+decision or production code.
