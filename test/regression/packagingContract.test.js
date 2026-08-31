@@ -31,6 +31,10 @@ await (async () => {
     assert.doesNotMatch(source, /![A-Z_]+!/u);
     assert.match(source, /Tracked server PID/iu);
     assert.match(source, /Current port owner is PID %PORT_PID%/iu);
+    assert.match(source, /Get-CimInstance Win32_Process/iu);
+    assert.match(source, /Join-Path \$env:APP_ROOT 'src\\server\.js'/iu);
+    assert.match(source, /PORT must contain only digits/iu);
+    assert.match(source, /%%~B/iu);
   });
 
   test("runtime manifest includes every live prompt and public resource read", async () => {

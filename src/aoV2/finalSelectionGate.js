@@ -1,6 +1,6 @@
 import { extractCaseNumbers, normalizeCaseNumber } from "../router.js";
 import { text } from "../text.js";
-import { normalizeLawArticle } from "../lawReferences.js";
+import { lawNameBeforeArticle, normalizeLawArticle } from "../lawReferences.js";
 
 const LAW_ARTICLE_PATTERN = /(?<!\d)(?:제)?\d+조(?:의\d+)?(?:제\d+항)?(?:제\d+호)?/gu;
 const GENERIC_PROVIDER_CASE_PATTERN = /(?<!\d)((?:19|20)\d{2}|\d{2})\s*([가-힣]{1,4})\s*(\d{1,7})(?!\d)/gu;
@@ -32,13 +32,18 @@ function narrativeCaseReferences(value) {
   return references;
 }
 
-const LAW_NAME_ARTICLE_PATTERN = /([\uAC00-\uD7A3A-Za-z0-9\u00B7]+) +((?:\uC81C)?[0-9]+\uC870(?:\uC758[0-9]+)?(?:\uC81C[0-9]+\uD56D)?(?:\uC81C[0-9]+\uD638)?)/gu;
+const LAW_NAME_ARTICLE_PATTERN = /(?:제)?\d+조(?:의\d+)?(?:제\d+항)?(?:제\d+호)?/gu;
 
 function narrativeLawReferences(value) {
-  return [...value.matchAll(LAW_NAME_ARTICLE_PATTERN)].map((match) => ({
-    lawName: text(match[1]),
-    article: normalizeLawArticle(match[2]),
-  })).filter((reference) => reference.lawName && reference.article);
+  let currentLaw = "";
+  return [...value.matchAll(LAW_NAME_ARTICLE_PATTERN)].map((match) => {
+    const explicitLaw = lawNameBeforeArticle(value, match.index);
+    if (explicitLaw) currentLaw = explicitLaw;
+    return {
+      lawName: currentLaw,
+      article: normalizeLawArticle(match[0]),
+    };
+  }).filter((reference) => reference.article);
 }
 
 export function sanitizeEvidenceNarrative(intro, {
@@ -52,6 +57,7 @@ export function sanitizeEvidenceNarrative(intro, {
   const safeSegments = narrativeSegments(source).filter((segment) => {
     let safe = true;
     const lawReferences = narrativeLawReferences(segment);
+    const usedLawReferences = new Set();
     for (const reference of narrativeCaseReferences(segment)) {
       references.push({ claimType: "case", normalizedReference: reference.caseNumber });
       if (!isCaseVerified(reference.caseNumber)) {
@@ -61,7 +67,10 @@ export function sanitizeEvidenceNarrative(intro, {
     }
     for (const match of segment.matchAll(LAW_ARTICLE_PATTERN)) {
       const article = normalizeLawArticle(match[0]);
-      const lawReference = lawReferences.find((reference) => reference.article === article) || {};
+      const lawReferenceIndex = lawReferences.findIndex((reference, index) =>
+        reference.article === article && !usedLawReferences.has(index));
+      const lawReference = lawReferenceIndex >= 0 ? lawReferences[lawReferenceIndex] : {};
+      if (lawReferenceIndex >= 0) usedLawReferences.add(lawReferenceIndex);
       if (article) references.push({ claimType: "law", normalizedReference: article, lawName: lawReference.lawName || "" });
       if (article && !isLawArticleOpened(article, lawReference)) {
         diagnostics.add("INTRO_UNVERIFIED_LAW_ARTICLE_REMOVED");

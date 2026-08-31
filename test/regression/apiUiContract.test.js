@@ -123,6 +123,29 @@ await (async () => {
     assert.equal("email" in health.quota.codexQuota, false);
   });
 
+  test("Gemini health does not instantiate Codex account or runtime state", async () => {
+    let accountFactoryCalls = 0;
+    let runtimeInspectCalls = 0;
+    const health = await healthPayload({
+      searchAdapter: "gemini_d",
+      codexAccountManagerImpl: () => {
+        accountFactoryCalls += 1;
+        throw new Error("Codex account must stay dormant for Gemini health");
+      },
+      codexRuntimeImpl: () => ({
+        inspect: async () => {
+          runtimeInspectCalls += 1;
+          throw new Error("Codex runtime must stay dormant for Gemini health");
+        },
+      }),
+    });
+    assert.equal(accountFactoryCalls, 0);
+    assert.equal(runtimeInspectCalls, 0);
+    assert.equal(health.adapter.id, "gemini_d");
+    assert.equal(health.codex.codexAvailable, false);
+    assert.equal(health.quota.codexQuota.loggedIn, false);
+  });
+
   test("future Codex app-server errors use the unavailable runtime response", async () => {
     const server = http.createServer(createRequestHandler({
       codexAccountManagerImpl: () => ({
@@ -293,6 +316,8 @@ await (async () => {
     assert.match(appJs, /payload\.quota\?\.gemini\?\.label/u);
     assert.match(appJs, /usageTitle = "Codex 사용량"/u);
     assert.match(appJs, /payload\.quota\?\.codexQuota/u);
+    assert.match(appJs, /mcp\.providerReady === true/u);
+    assert.match(appJs, /mcp\.ocConfigured === false/u);
     assert.match(appJs, /SEARCH_FAILED: "검색 검증에 실패했습니다"/u);
     assert.doesNotMatch(appJs, /SEARCH_FAILED: "원문 검증에 실패했습니다"/u);
   });

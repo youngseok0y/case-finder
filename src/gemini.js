@@ -147,6 +147,24 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function waitWithAbort(milliseconds, signal) {
+  if (!signal) return wait(milliseconds);
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    let timer;
+    const onAbort = () => {
+      if (timer) clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(abortedError());
+    };
+    timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 function recordGeminiAttempt(telemetry, response, isRetry) {
   if (!telemetry) return;
   telemetry.geminiRequests = (telemetry.geminiRequests || 0) + 1;
@@ -191,7 +209,7 @@ async function generateContent(request, { telemetry = null, abortSignal = null }
       throw error;
     }
     recordGeminiAttempt(telemetry, null, false);
-    await wait(config.geminiRetryDelayMs);
+    await waitWithAbort(config.geminiRetryDelayMs, abortSignal);
     throwIfAborted(abortSignal);
     await reserveGeminiCall(Date.now(), { telemetry, abortSignal });
     throwIfAborted(abortSignal);

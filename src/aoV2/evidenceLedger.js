@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { normalizeCaseIdentityText } from "../caseIdentity.js";
 import { text } from "../text.js";
-import { normalizeLawArticle } from "../lawReferences.js";
+import { normalizeLawArticle, normalizeLawName } from "../lawReferences.js";
 import {
   canonicalCaseIdentity,
   caseIdentityMatches,
@@ -371,11 +371,12 @@ export class EvidenceLedger {
     return { added, observed: items.length || 0 };
   }
 
-  recordLawText({ mst = "", lawId = "", jo = "", textOpened = true } = {}) {
+  recordLawText({ mst = "", lawId = "", jo = "", textOpened = true, failureCode = "" } = {}) {
     const targetMst = text(mst);
     const targetLawId = text(lawId);
     const law = [...this.laws.values()].find((item) =>
-      (targetMst && item.mst === targetMst) || (targetLawId && item.lawId === targetLawId));
+      (!targetMst || item.mst === targetMst)
+      && (!targetLawId || item.lawId === targetLawId));
     if (!law) {
       this.recordVerificationFailure({
         code: "LAW_NOT_OBSERVED",
@@ -392,8 +393,8 @@ export class EvidenceLedger {
       law.evidenceState = "VERIFIED";
     } else {
       law.evidenceState = "REJECTED";
-      law.failureCode = "LAW_TEXT_NOT_OPENED";
-      this.recordVerificationFailure({ code: "LAW_TEXT_NOT_OPENED", evidenceKey: law.evidenceKey });
+      law.failureCode = text(failureCode) || "LAW_TEXT_NOT_OPENED";
+      this.recordVerificationFailure({ code: law.failureCode, evidenceKey: law.evidenceKey });
     }
     return { verified: law.textOpened, reason: law.failureCode, evidenceKey: law.evidenceKey };
   }
@@ -401,13 +402,13 @@ export class EvidenceLedger {
   isLawArticleOpened({ mst = "", lawId = "", lawName = "", jo = "", article = "" } = {}) {
     const targetMst = text(mst);
     const targetLawId = text(lawId);
-    const targetLawName = text(lawName);
+    const targetLawName = normalizeLawName(lawName);
     const targetArticle = normalizeLawArticle(jo || article);
     if (!targetArticle) return false;
     return [...this.laws.values()].some((item) =>
       (!targetMst || item.mst === targetMst)
       && (!targetLawId || item.lawId === targetLawId)
-      && (!targetLawName || item.title === targetLawName)
+      && (!targetLawName || normalizeLawName(item.title) === targetLawName)
       && (item.openedArticles || []).includes(targetArticle),
     );
   }
@@ -421,7 +422,9 @@ export class EvidenceLedger {
     const targetMst = text(mst);
     const targetLawId = text(lawId);
     return [...this.laws.values()].some((item) =>
-      (targetMst && item.mst === targetMst) || (targetLawId && item.lawId === targetLawId));
+      (!targetMst || item.mst === targetMst)
+      && (!targetLawId || item.lawId === targetLawId)
+      && (Boolean(targetMst) || Boolean(targetLawId)));
   }
 
   getCase(caseNumber) {
@@ -549,7 +552,7 @@ export class EvidenceLedger {
         const requestedLawName = text(claim?.lawName);
         const sameLaw = (item) => (!requestedLawId || item.lawId === requestedLawId)
           && (!requestedMst || item.mst === requestedMst)
-          && (!requestedLawName || item.title === requestedLawName);
+          && (!requestedLawName || normalizeLawName(item.title) === normalizeLawName(requestedLawName));
         const openedLaw = [...this.laws.values()].find((item) => sameLaw(item) && (item.openedArticles || []).includes(normalizedReference));
         const observedLaw = openedLaw || [...this.laws.values()].find((item) => sameLaw(item) && item.observed);
         evidenceKey ||= observedLaw?.evidenceKey || "";

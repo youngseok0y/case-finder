@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { config } from "../config.js";
 
@@ -26,6 +27,15 @@ export function logInfo(message) {
   console.log(`[case-finder] ${message}`);
 }
 
+export function validationLogMessage(query, caseNumber, reason) {
+  const rawQuery = String(query ?? "");
+  const queryDigest = createHash("sha256").update(rawQuery, "utf8").digest("hex");
+  const safe = (value) => sanitizeLogValue(value)
+    .replace(/\s+/g, " ")
+    .slice(0, 500);
+  return `질문_sha256=${queryDigest} 질문_길이=${Buffer.byteLength(rawQuery, "utf8")} 사건번호=${safe(caseNumber)} 사유=${safe(reason)}`;
+}
+
 export async function logError(message, error) {
   const detail = error instanceof Error ? `${error.message}\n${error.stack || ""}` : String(error || "");
   const safeMessage = sanitizeLogValue(`${message}${detail ? `: ${detail}` : ""}`);
@@ -38,10 +48,7 @@ export async function logError(message, error) {
 }
 
 export async function logValidation(query, caseNumber, reason) {
-  const safe = (value) => sanitizeLogValue(value)
-    .replace(/\s+/g, " ")
-    .slice(0, 500);
-  const message = `질문=${safe(query)} 사건번호=${safe(caseNumber)} 사유=${safe(reason)}`;
+  const message = validationLogMessage(query, caseNumber, reason);
   try {
     await append(validationLog, message);
   } catch (writeError) {

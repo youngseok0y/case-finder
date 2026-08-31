@@ -24,9 +24,16 @@ exit /b 1
 :runtime_directory_ready
 set "APP_PORT=3300"
 if not exist "%~dp0.env" goto port_ready
-for /f "usebackq tokens=1,* delims==" %%A in ("%~dp0.env") do if "%%A"=="PORT" set "APP_PORT=%%B"
+for /f "usebackq tokens=1,* delims==" %%A in ("%~dp0.env") do if /i "%%A"=="PORT" set "APP_PORT=%%~B"
 
 :port_ready
+powershell.exe -NoProfile -Command "$v = $env:APP_PORT; if ($v -notmatch '^\d+$' -or [int]$v -lt 1 -or [int]$v -gt 65535) { exit 1 } else { exit 0 }"
+if not errorlevel 1 goto port_valid
+echo PORT must contain only digits and be between 1 and 65535.
+pause
+exit /b 1
+
+:port_valid
 set "NODE_VERSION="
 for /f "tokens=1" %%V in ('"%NODE_EXE%" --version') do set "NODE_VERSION=%%V"
 if defined NODE_VERSION goto node_version_detected
@@ -108,15 +115,22 @@ if defined PORT_IMAGE exit /b 0
 set "PORT_IMAGE=unknown image"
 exit /b 0
 
+:checkExpectedServerProcess
+set "EXPECTED_SERVER_PROCESS=0"
+for /f "delims=" %%E in ('powershell.exe -NoProfile -Command "try { $p = Get-CimInstance Win32_Process -Filter 'ProcessId=%PORT_PID%' -ErrorAction Stop; $expected = [IO.Path]::GetFullPath((Join-Path $env:APP_ROOT 'src\server.js')); $pattern = '(?i)(?:^|\s|\x22)' + [regex]::Escape($expected) + '(?:$|\s|\x22)'; if ($p -and $p.CommandLine -and $p.CommandLine -match $pattern) { Write-Output OK } } catch { exit 1 }"') do if "%%E"=="OK" set "EXPECTED_SERVER_PROCESS=1"
+if "%EXPECTED_SERVER_PROCESS%"=="1" exit /b 0
+exit /b 1
+
 :startServer
 call :findPortPid
 if not defined PORT_PID goto launchServer
 call :checkCaseFinderHealth
-if not errorlevel 1 goto stopExistingServer
 call :getPortProcessInfo
+call :checkExpectedServerProcess
+if not errorlevel 1 goto stopExistingServer
 echo Port %APP_PORT% is used by PID %PORT_PID% - %PORT_IMAGE%.
-echo Case Finder /health did not respond. The process may be stale or hung.
-echo Refusing to terminate an unconfirmed process. Stop PID %PORT_PID% manually or change PORT.
+echo Refusing to terminate an unconfirmed process or non-Case Finder process.
+echo Stop PID %PORT_PID% manually or change PORT.
 exit /b 1
 
 :stopExistingServer

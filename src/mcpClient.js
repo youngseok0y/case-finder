@@ -12,6 +12,14 @@ let client = null;
 let transport = null;
 let startPromise = null;
 let lastToolNames = [];
+let probeAttempted = false;
+let providerReady = false;
+let failureCode = "";
+
+function safeFailureCode(value, fallback) {
+  const code = String(value || "").trim().toUpperCase();
+  return /^[A-Z][A-Z0-9_]{0,63}$/u.test(code) ? code : fallback;
+}
 
 export function buildMcpServerParameters({
   platform = process.platform,
@@ -118,55 +126,80 @@ export async function closeStaleTransport(staleTransport, onError = () => {}) {
 }
 
 async function connectOnce() {
-  const params = buildMcpServerParameters();
-  const nextTransport = new StdioClientTransport(params);
-  const nextClient = new Client(
-    { name: "case-finder", version: "0.1.0" },
-    { capabilities: {} },
-  );
+  try {
+    const params = buildMcpServerParameters();
+    const nextTransport = new StdioClientTransport(params);
+    const nextClient = new Client(
+      { name: "case-finder", version: "0.1.0" },
+      { capabilities: {} },
+    );
 
-  nextTransport.onerror = (error) => {
-    void logError("korean-law-mcp process error", error);
-  };
-  nextTransport.onclose = () => {
-    if (transport === nextTransport) {
-      client = null;
-      transport = null;
-    }
-    logInfo("korean-law-mcp connection closed.");
-  };
+    nextTransport.onerror = (error) => {
+      failureCode = "MCP_TRANSPORT_ERROR";
+      void logError("korean-law-mcp process error", error);
+    };
+    nextTransport.onclose = () => {
+      if (transport === nextTransport) {
+        client = null;
+        transport = null;
+        providerReady = false;
+      }
+      logInfo("korean-law-mcp connection closed.");
+    };
 
-  await nextClient.connect(nextTransport);
-  const listed = await nextClient.listTools();
-  lastToolNames = (listed.tools || []).map((tool) => tool.name);
-  client = nextClient;
-  transport = nextTransport;
-  logInfo(`korean-law-mcp connected (${lastToolNames.length} tools)`);
+    await nextClient.connect(nextTransport);
+    const listed = await nextClient.listTools();
+    lastToolNames = (listed.tools || []).map((tool) => tool.name);
+    client = nextClient;
+    transport = nextTransport;
+    failureCode = "";
+    logInfo(`korean-law-mcp connected (${lastToolNames.length} tools)`);
+  } catch (error) {
+    failureCode = safeFailureCode(error.code, "MCP_TRANSPORT_UNAVAILABLE");
+    throw error;
+  }
 }
 
 export async function startMcp({ probe = false } = {}) {
-  if (client) return;
-  if (!startPromise) {
-    startPromise = connectOnce().finally(() => {
-      startPromise = null;
-    });
-  }
-  await startPromise;
-
-  if (probe && config.lawOc) {
-    const result = await callTool("search_law", { query: config.mcpProbeQuery, display: 1 });
-    const responseText = toolText(result) || (typeof result?.rawText === "string" ? result.rawText : "");
-    const category = classifyLegalResult(result, {
-      toolName: "search_law",
-      rawText: responseText,
-      parsedItems: parseLawSearchResults(responseText).length > 0,
-    });
-    if (category !== LEGAL_RESULT_CATEGORIES.SUCCESS) {
-      throw new Error("M0 MCP probe failed");
+  if (!client) {
+    if (!startPromise) {
+      startPromise = connectOnce().finally(() => {
+        startPromise = null;
+      });
     }
-    logInfo(`M0 MCP probe passed: search_law("${config.mcpProbeQuery}")`);
-  } else if (probe) {
-    logInfo("M0 MCP probe skipped because LAW_OC is not configured.");
+    await startPromise;
+  }
+
+  if (probe && !probeAttempted) {
+    probeAttempted = true;
+    providerReady = false;
+    if (!config.lawOc) {
+      failureCode = "MCP_OC_NOT_CONFIGURED";
+      logInfo("M0 MCP probe skipped because LAW_OC is not configured.");
+      return;
+    }
+    try {
+      const result = await callTool("search_law", { query: config.mcpProbeQuery, display: 1 });
+      const responseText = toolText(result) || (typeof result?.rawText === "string" ? result.rawText : "");
+      const category = classifyLegalResult(result, {
+        toolName: "search_law",
+        rawText: responseText,
+        parsedItems: parseLawSearchResults(responseText).length > 0,
+      });
+      if (category !== LEGAL_RESULT_CATEGORIES.SUCCESS) {
+        failureCode = "MCP_PROBE_FAILED";
+        const error = new Error("M0 MCP probe failed");
+        error.code = failureCode;
+        throw error;
+      }
+      providerReady = true;
+      failureCode = "";
+      logInfo(`M0 MCP probe passed: search_law("${config.mcpProbeQuery}")`);
+    } catch (error) {
+      providerReady = false;
+      failureCode ||= safeFailureCode(error.code, "MCP_PROBE_FAILED");
+      throw error;
+    }
   }
 }
 
@@ -204,10 +237,19 @@ export async function callTool(name, args = {}, timeoutOrOptions = config.mcpTim
 export function getMcpStatus() {
   return {
     connected: Boolean(client),
+    transportConnected: Boolean(client),
+    ocConfigured: Boolean(config.lawOc),
+    probeAttempted,
+    providerReady,
+    failureCode: failureCode || (config.lawOc ? "" : "MCP_OC_NOT_CONFIGURED"),
     tools: [...lastToolNames],
   };
 }
 
 export async function closeMcp() {
   await invalidateMcpTransport();
+  lastToolNames = [];
+  probeAttempted = false;
+  providerReady = false;
+  failureCode = "";
 }

@@ -269,7 +269,7 @@ await (async () => {
   const test = (await import("node:test")).default;
   const { createEvidenceLedger, parseProviderCompoundCaseNumber } = await import("../../src/aoV2/evidenceLedger.js");
   const { finalizeSelection } = await import("../../src/aoV2/finalSelectionGate.js");
-  const { createLegalToolGateway, LEGAL_TOOL_NAMES } = await import("../../src/aoV2/legalToolGateway.js");
+  const { createLegalToolGateway, LEGAL_TOOL_NAMES, normalizeLegalToolResult } = await import("../../src/aoV2/legalToolGateway.js");
   const { classifyLegalResult, LEGAL_RESULT_CATEGORIES } = await import("../../src/legalResultClassifier.js");
   const { caseNumberMatches } = await import("../../src/router.js");
   function verifiedLedger() {
@@ -342,6 +342,35 @@ await (async () => {
     assert.equal(result.hallucinationDetected, false);
     assert.equal(result.searchCompleted, true);
     assert.equal(ledger.snapshot().searchTraces.length, 1);
+  });
+
+  test("law detail identity is fail-closed and conflicting identifiers never reach the provider", async () => {
+    const ledger = createEvidenceLedger({ provider: "law-identity-fixture" });
+    ledger.recordLawSearch({
+      query: "민법",
+      items: [{ title: "민법", mst: "m1", lawId: "l1" }],
+    });
+    let calls = 0;
+    const gateway = createLegalToolGateway({
+      ledger,
+      callTool: async () => {
+        calls += 1;
+        return { rawText: "제756조\nprovider law text" };
+      },
+    });
+    const conflict = await gateway.execute("get_law_text", { mst: "m1", lawId: "l2", jo: "제756조" });
+    assert.equal(conflict.code, "CONFLICTING_LAW_IDENTIFIERS");
+    assert.equal(calls, 0);
+
+    const mismatch = await gateway.execute("get_law_text", { mst: "m1", jo: "제750조" });
+    assert.equal(mismatch.lawArticleVerified, false);
+    assert.equal(mismatch.lawArticleFailureCode, "LAW_ARTICLE_MISMATCH");
+    assert.equal(ledger.isLawArticleOpened({ mst: "m1", article: "제750조" }), false);
+    assert.equal(ledger.snapshot().verificationFailures.at(-1).code, "LAW_ARTICLE_MISMATCH");
+    assert.equal(calls, 1);
+
+    assert.equal(normalizeLegalToolResult("get_law_text", { rawText: "" }, { jo: "제750조" }).lawArticleFailureCode, "LAW_TEXT_EMPTY");
+    assert.equal(normalizeLegalToolResult("get_law_text", { rawText: "제750조\n제751조" }, { jo: "제750조" }).lawArticleFailureCode, "LAW_ARTICLE_AMBIGUOUS");
   });
 
   test("legal result categories distinguish success, sentinels, provider errors, and invalid payloads", () => {

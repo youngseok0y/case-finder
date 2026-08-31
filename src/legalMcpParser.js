@@ -1,3 +1,5 @@
+import { normalizeLawArticle } from "./lawReferences.js";
+
 const DETAIL_SECTIONS = ["판시사항", "판결요지", "결정요지", "재결주문", "재결요지", "참조조문", "참조판례", "이유", "전문"];
 
 export function toolText(result) {
@@ -116,4 +118,18 @@ export function parseLawSearchResults(rawText) {
   }
   if (current) results.push(current);
   return results;
+}
+
+export function parseLawArticleIdentity(rawText) {
+  const text = decodeBasicHtml(rawText);
+  const identities = [...text.matchAll(/(?:^|\n)\s*(?:조문(?:번호)?\s*:\s*)?((?:제)?\d+조(?:의\d+)?)(?=\s|$|[(:：])/gu)]
+    .map((match) => normalizeLawArticle(match[1]))
+    .filter(Boolean);
+  const unique = [...new Set(identities)];
+  return {
+    article: unique.length === 1 ? unique[0] : "",
+    articles: unique,
+    identifiable: unique.length === 1,
+    ambiguous: unique.length > 1,
+  };
 }

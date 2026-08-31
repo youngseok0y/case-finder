@@ -238,7 +238,12 @@ async function submitSearch(event) {
 function renderServiceStatus(payload) {
   if (!payload) return;
   const engine = payload.adapter?.label || "확인 불가";
-  const law = payload.mcp?.connected ? "연결됨" : "연결 확인 필요";
+  const mcp = payload.mcp || {};
+  const law = mcp.providerReady === true
+    ? "연결됨"
+    : mcp.ocConfigured === false
+      ? "인증키 설정 필요"
+      : "연결 확인 필요";
   const adapterId = payload.adapter?.id;
   let usageTitle = "Codex 사용량";
   let usageLabel;

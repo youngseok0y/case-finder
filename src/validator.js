@@ -1,5 +1,6 @@
 import { logValidation } from "./log.js";
 import { normalizeLawArticle, sanitizeEvidenceNarrative } from "./aoV2/finalSelectionGate.js";
+import { normalizeLawName } from "./lawReferences.js";
 import { deriveTerminalState } from "./searchAdapters/resultContract.js";
 import { SAFETY_REJECTED_MESSAGE } from "./productMessages.js";
 import {
@@ -90,11 +91,13 @@ export async function validateNaturalResult(result) {
       && caseNumberMatches(item.caseNumber, caseNumber)
       && Boolean(item.detail?.rawText),
     ),
-    isLawArticleOpened: (article) => {
+    isLawArticleOpened: (article, context = {}) => {
       const normalizedArticle = normalizeLawArticle(article);
+      const normalizedLaw = normalizeLawName(context.lawName);
       return (result.lawReferences || []).some((reference) =>
         normalizeLawArticle(reference?.article) === normalizedArticle
         && Boolean(reference?.lawName)
+        && (!normalizedLaw || normalizeLawName(reference.lawName) === normalizedLaw)
         && Boolean(reference?.text),
       );
     },

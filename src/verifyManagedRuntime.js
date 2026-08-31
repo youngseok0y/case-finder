@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { inspectPackagedCodexAppServerRuntime } from "./codexAppServerRuntime.js";
 import { resolveRuntimePaths } from "./runtimePaths.js";
@@ -13,6 +15,42 @@ const installedApp = path.basename(appRootFromScript).toLowerCase() === "app";
 function optionValue(name) {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] || "" : "";
+}
+
+export function parseVerifierPort(value) {
+  const raw = String(value ?? "").trim();
+  if (!/^\d+$/u.test(raw)) fail("MANAGED_PORT_INVALID", "port must contain digits only");
+  const port = Number(raw);
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) fail("MANAGED_PORT_INVALID", `port:${raw}`);
+  return port;
+}
+
+export async function findAvailablePort({ host = "127.0.0.1", netImpl = net } = {}) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const probe = netImpl.createServer();
+    try {
+      await new Promise((resolve, reject) => {
+        const onError = (error) => {
+          probe.removeListener("listening", onListening);
+          reject(error);
+        };
+        const onListening = () => {
+          probe.removeListener("error", onError);
+          resolve();
+        };
+        probe.once("error", onError);
+        probe.once("listening", onListening);
+        probe.listen(0, host);
+      });
+      const address = probe.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      await new Promise((resolve) => probe.close(() => resolve()));
+      if (Number.isInteger(port) && port > 0 && port <= 65_535) return port;
+    } catch {
+      try { probe.close(); } catch { /* already closed */ }
+    }
+  }
+  fail("MANAGED_PORT_UNAVAILABLE", "could not reserve an ephemeral loopback port");
 }
 
 function fail(code, message) {
@@ -79,12 +117,14 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15_000, fetchImpl
 export async function waitForHealth(
   port,
   child,
-  { fetchImpl = fetch, sleep = () => new Promise((resolve) => setTimeout(resolve, 500)) } = {},
+  { fetchImpl = fetch, sleep = () => new Promise((resolve) => setTimeout(resolve, 500)), healthToken = "" } = {},
 ) {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     if (child.exitCode !== null) fail("MANAGED_SERVER_EXITED", `exit:${child.exitCode}`);
     try {
-      const response = await fetchWithTimeout(`http://127.0.0.1:${port}/health`, {}, 2_000, fetchImpl);
+      const response = await fetchWithTimeout(`http://127.0.0.1:${port}/health`, healthToken
+        ? { headers: { "x-case-finder-health-token": healthToken } }
+        : {}, 2_000, fetchImpl);
       if (response.status === 200) return await response.json();
     } catch {
       // The server may still be starting.
@@ -155,14 +195,17 @@ async function main() {
   const appServerRuntime = await inspectPackagedCodexAppServerRuntime({ platform: "win32", arch: "x64" });
   verifyAppServerCapabilities(appServerRuntime);
 
-  const port = Number.parseInt(optionValue("--port") || process.env.M9RR3_VERIFY_PORT || "3311", 10);
+  const requestedPort = optionValue("--port") || process.env.M9RR3_VERIFY_PORT || "";
+  const port = requestedPort ? parseVerifierPort(requestedPort) : await findAvailablePort();
   const query = optionValue("--query") || GOLDEN_QUERY;
+  const healthToken = randomUUID();
   const childEnv = {
     ...process.env,
     CASE_FINDER_INSTALL_ROOT: installRoot,
     CASE_FINDER_APP_ROOT: appRoot,
     CASE_FINDER_ENV_PATH: process.env.CASE_FINDER_ENV_PATH || paths.envPath,
     PORT: String(port),
+    CASE_FINDER_HEALTH_TOKEN: healthToken,
     SEARCH_ADAPTER: process.env.SEARCH_ADAPTER || "luna_native",
   };
   const child = spawn(paths.managedNodePath, [paths.serverPath], {
@@ -172,11 +215,16 @@ async function main() {
     stdio: ["ignore", "ignore", "ignore"],
   });
   try {
-    const health = await waitForHealth(port, child);
+    const health = await waitForHealth(port, child, { healthToken });
     if (health.service !== "case-finder" || health.ok !== true) {
       fail("MANAGED_HEALTH_FAILED", `service:${health.service || "missing"};ok:${String(health.ok)};keys:${Object.keys(health).join(",")}`);
     }
-    if (health.mcp?.connected !== true) fail("MANAGED_MCP_STARTUP_FAILED", "restricted MCP is not connected");
+    if (health.mcp?.transportConnected !== true && health.mcp?.connected !== true) {
+      fail("MANAGED_MCP_STARTUP_FAILED", "restricted MCP transport is not connected");
+    }
+    if (health.mcp?.ocConfigured === true && health.mcp?.providerReady !== true) {
+      fail("MANAGED_MCP_PROBE_FAILED", "configured legal provider is not ready");
+    }
     const result = process.argv.includes("--skip-query") ? null : await runGoldenQuery(port, query);
     console.log(JSON.stringify({
       status: "M11_CODEX_APP_SERVER_PASS",

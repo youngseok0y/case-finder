@@ -16,12 +16,17 @@ import { executeQuery } from "./queryExecution.js";
 
 const server = http.createServer(createRequestHandler());
 
-server.on("error", (error) => {
-  void logError("HTTP 서버 오류", error);
-});
-
 const isMainModule = process.argv[1]
   && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+
+export async function handleServerError(error, { isMain = false, exit = (code) => process.exit(code) } = {}) {
+  await logError("HTTP 서버 오류", error);
+  if (isMain) exit(1);
+}
+
+server.on("error", (error) => {
+  void handleServerError(error, { isMain: isMainModule });
+});
 
 function closeHttpServer(server, graceMs) {
   return new Promise((resolve) => {

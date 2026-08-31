@@ -1,6 +1,7 @@
 import { config } from "../../config.js";
 import { callTool as defaultCallTool } from "../mcpClient.js";
-import { parseDecisionDetail, parseDecisionSearchResults, parseLawSearchResults, toolText } from "../legalMcpParser.js";
+import { parseDecisionDetail, parseDecisionSearchResults, parseLawArticleIdentity, parseLawSearchResults, toolText } from "../legalMcpParser.js";
+import { normalizeLawArticle } from "../lawReferences.js";
 import {
   classifyLegalResult,
   isCompletedLegalSearch,
@@ -42,7 +43,7 @@ function normalizeToolState(name, raw, rawText, parsedItems = false) {
   };
 }
 
-export function normalizeLegalToolResult(name, raw) {
+export function normalizeLegalToolResult(name, raw, args = {}) {
   const rawText = toolText(raw) || (typeof raw?.rawText === "string" ? raw.rawText : "");
   if (name === "search_decisions") {
     const items = parseDecisionSearchResults(rawText).map((item) => ({
@@ -81,7 +82,36 @@ export function normalizeLegalToolResult(name, raw) {
       rawText,
     };
   }
-  if (name === "get_law_text") return { ...normalizeToolState(name, raw, rawText), rawText };
+  if (name === "get_law_text") {
+    const state = normalizeToolState(name, raw, rawText);
+    const requestedArticle = normalizeLawArticle(args?.jo);
+    const returnedArticle = parseLawArticleIdentity(rawText);
+    const lawArticleVerified = !requestedArticle
+      ? true
+      : state.isError
+        ? false
+        : returnedArticle.identifiable && returnedArticle.article === requestedArticle;
+    const lawArticleFailureCode = !rawText
+        ? "LAW_TEXT_EMPTY"
+        : state.isError
+          ? state.category
+        : returnedArticle.ambiguous
+          ? "LAW_ARTICLE_AMBIGUOUS"
+          : !returnedArticle.identifiable
+            ? "LAW_ARTICLE_UNIDENTIFIABLE"
+            : returnedArticle.article !== requestedArticle
+              ? "LAW_ARTICLE_MISMATCH"
+              : "";
+    return {
+      ...state,
+      rawText,
+      requestedArticle,
+      returnedArticle: returnedArticle.article,
+      returnedArticles: returnedArticle.articles,
+      lawArticleVerified,
+      lawArticleFailureCode,
+    };
+  }
   return errorResult("UNKNOWN_TOOL", `Unsupported legal tool: ${name}`);
 }
 
@@ -151,7 +181,12 @@ export class LegalToolGateway {
       const mst = text(rawArgs?.mst);
       const lawId = text(rawArgs?.lawId);
       if (!mst && !lawId) return this.reject("INVALID_ARGUMENT", "get_law_text requires mst or lawId.");
-      if (!this.ledger.isLawObserved({ mst, lawId })) return this.reject("UNOBSERVED_DETAIL_REJECTED", "Law identifier was not observed from a law search result.");
+      if (!this.ledger.isLawObserved({ mst, lawId })) {
+        return this.reject(
+          mst && lawId ? "CONFLICTING_LAW_IDENTIFIERS" : "UNOBSERVED_DETAIL_REJECTED",
+          mst && lawId ? "Law identifiers did not resolve to one observed law." : "Law identifier was not observed from a law search result.",
+        );
+      }
       args = { ...(mst ? { mst } : {}), ...(lawId ? { lawId } : {}) };
       const jo = text(rawArgs?.jo);
       if (jo) args.jo = jo;
@@ -182,7 +217,8 @@ export class LegalToolGateway {
         mst: args.mst,
         lawId: args.lawId,
         jo: args.jo,
-        textOpened: !normalized.isError && Boolean(normalized.rawText),
+        textOpened: !normalized.isError && Boolean(normalized.rawText) && normalized.lawArticleVerified !== false,
+        failureCode: normalized.lawArticleFailureCode,
       });
     }
     return normalized;

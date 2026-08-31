@@ -7,6 +7,20 @@ export function normalizeLawArticle(value) {
   return `제${Number.parseInt(match[1], 10)}조${match[2] ? `의${Number.parseInt(match[2], 10)}` : ""}`;
 }
 
+export function normalizeLawName(value) {
+  return text(value)
+    .replace(/^[\s「『〈《\[\(]+|[\s」』〉》\]\)]+$/gu, "")
+    .replace(/\s+/gu, "")
+    .replace(/^대한민국헌법$/u, "헌법");
+}
+
+export function lawNameBeforeArticle(value, articleOffset) {
+  const prefix = text(value).slice(0, Math.max(0, Number(articleOffset) || 0));
+  const clause = prefix.split(/[,;\/\n]+/u).at(-1) || prefix;
+  const match = clause.match(/(?:^|\s)(?:\[\d+\]\s*)?([가-힣A-Za-z0-9·()「」『』ㆍ\s]{1,80}?(?:시행규칙|시행령|법률|헌법|규칙|법)[」』]?)[\s]*$/u);
+  return normalizeLawName(match?.[1] || "");
+}
+
 export function normalizeLawReference(reference, { resolveLink = null } = {}) {
   if (!reference || typeof reference !== "object") return null;
   const link = text(reference.link) || (typeof resolveLink === "function" ? text(resolveLink(reference)) : "");
@@ -16,10 +30,6 @@ export function normalizeLawReference(reference, { resolveLink = null } = {}) {
     article: text(reference.article),
     link,
   };
-}
-
-function normalizeLawName(value) {
-  return text(value).replace(/\s+/gu, "").replace(/^대한민국헌법$/u, "헌법");
 }
 
 export function lawReferenceIdentityKey(reference) {

@@ -18,9 +18,9 @@ await (async () => {
   const { createGeminiDAdapter } = await import("../../src/searchAdapters/geminiDAdapter.js");
   const { runDeterministicPipeline } = await import("../../src/nlPipeline.js");
   const { withMcpTimeout } = await import("../../src/mcpClient.js");
-  const { sanitizeLogValue } = await import("../../src/log.js");
-  const { waitForHealth } = await import("../../src/verifyManagedRuntime.js");
-  const { createGracefulShutdown, createRequestHandler } = await import("../../src/server.js");
+  const { sanitizeLogValue, validationLogMessage } = await import("../../src/log.js");
+  const { findAvailablePort, parseVerifierPort, waitForHealth } = await import("../../src/verifyManagedRuntime.js");
+  const { createGracefulShutdown, createRequestHandler, handleServerError } = await import("../../src/server.js");
   const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
   class FakeChild extends EventEmitter {
@@ -238,6 +238,40 @@ await (async () => {
     assert.match(value, /REDACTED/iu);
   });
 
+  test("validation logs retain a query digest and never write the raw query", () => {
+    const query = "민감한 개인 사건 질문";
+    const message = validationLogMessage(query, "2024다12345", "INTRO_UNVERIFIED_CASE_REFERENCE_REMOVED");
+    assert.doesNotMatch(message, new RegExp(query, "u"));
+    assert.match(message, /질문_sha256=[0-9a-f]{64}/u);
+    assert.match(message, /질문_길이=\d+/u);
+    assert.match(message, /INTRO_UNVERIFIED_CASE_REFERENCE_REMOVED/u);
+  });
+
+  test("managed verifier rejects malformed ports and selects a free ephemeral port", async () => {
+    assert.equal(parseVerifierPort("43301"), 43301);
+    assert.throws(() => parseVerifierPort('"43301"'), { code: "MANAGED_PORT_INVALID" });
+    assert.throws(() => parseVerifierPort("65536"), { code: "MANAGED_PORT_INVALID" });
+
+    const occupied = http.createServer();
+    await new Promise((resolve) => occupied.listen(0, "127.0.0.1", resolve));
+    const occupiedPort = occupied.address().port;
+    try {
+      const selected = await findAvailablePort();
+      assert.ok(Number.isInteger(selected));
+      assert.notEqual(selected, occupiedPort);
+    } finally {
+      await new Promise((resolve) => occupied.close(resolve));
+    }
+  });
+
+  test("main server errors can be made fatal while imported servers remain non-fatal", async () => {
+    const exits = [];
+    await handleServerError(new Error("listen EADDRINUSE"), { isMain: true, exit: (code) => exits.push(code) });
+    assert.deepEqual(exits, [1]);
+    await handleServerError(new Error("test server error"), { isMain: false, exit: (code) => exits.push(code) });
+    assert.deepEqual(exits, [1]);
+  });
+
   test("packaging prune refuses an omitted staging root", () => {
     const result = spawnSync(process.execPath, [path.join(ROOT, "packaging", "prune-staging.mjs")], {
       cwd: ROOT,
@@ -308,7 +342,7 @@ await (async () => {
 await (async () => {
   const assert = (await import("node:assert/strict")).default;
   const test = (await import("node:test")).default;
-  const { buildMcpServerParameters, MCP_CALL_TIMEOUT, runMcpCall, withMcpTimeout } = await import("../../src/mcpClient.js");
+  const { buildMcpServerParameters, getMcpStatus, MCP_CALL_TIMEOUT, runMcpCall, withMcpTimeout } = await import("../../src/mcpClient.js");
   const { isTrustedLocalHost, sameOrigin } = await import("../../src/server.js");
   const { buildLegalMcpEnv } = await import("../../src/runtimeEnv.js");
   function request(headers, localPort = 3300) {
@@ -398,5 +432,16 @@ await (async () => {
       LAW_OC: "law-from-source",
     }, "law-from-source");
     assert.equal("CODEX_HOME" in env, false);
+  });
+
+  test("MCP health separates transport, configuration, probe, and provider readiness", () => {
+    const status = getMcpStatus();
+    assert.equal(typeof status.connected, "boolean");
+    assert.equal(status.transportConnected, status.connected);
+    assert.equal(typeof status.ocConfigured, "boolean");
+    assert.equal(typeof status.probeAttempted, "boolean");
+    assert.equal(typeof status.providerReady, "boolean");
+    assert.equal(typeof status.failureCode, "string");
+    assert.equal("LAW_OC" in status, false);
   });
 })();

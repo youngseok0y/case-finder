@@ -2,7 +2,7 @@
 await (async () => {
   const assert = (await import("node:assert/strict")).default;
   const test = (await import("node:test")).default;
-  const { parseDecisionDetail } = await import("../../src/legalMcpParser.js");
+  const { parseDecisionDetail, parseLawArticleIdentity } = await import("../../src/legalMcpParser.js");
   test("parseDecisionDetail restores Korean precedent sections and metadata", () => {
     const detail = parseDecisionDetail([
       "사건번호: 2024다12345",
@@ -54,6 +54,7 @@ await (async () => {
   const assert = (await import("node:assert/strict")).default;
   const test = (await import("node:test")).default;
   const { articleToJoNo, enrichLawReferences, lawDetailLink, parseStatuteReferences } = await import("../../src/directLookup.js");
+  const { parseLawArticleIdentity } = await import("../../src/legalMcpParser.js");
   const { dedupeLawReferences } = await import("../../src/lawReferences.js");
   const { renderResults } = await import("../../src/renderer.js");
   function pairs(value) {
@@ -90,6 +91,42 @@ await (async () => {
       ["민법", "제10조의3"],
     ]);
     assert.deepEqual(pairs("형법 제250조 / 형법 제250조"), [["형법", "제250조"]]);
+  });
+
+  test("law references preserve quoted names and normalize the constitutional alias", () => {
+    assert.deepEqual(pairs("「민법」 제750조, 『대한민국헌법』 제10조"), [
+      ["민법", "제750조"],
+      ["대한민국헌법", "제10조"],
+    ]);
+  });
+
+  test("law article identity rejects empty, ambiguous, and mismatched provider text", async () => {
+    assert.deepEqual(parseLawArticleIdentity("제750조(불법행위의 내용)\n실제 조문"), {
+      article: "제750조",
+      articles: ["제750조"],
+      identifiable: true,
+      ambiguous: false,
+    });
+    assert.deepEqual(parseLawArticleIdentity("법령명: 민법\n설명만 있음"), {
+      article: "",
+      articles: [],
+      identifiable: false,
+      ambiguous: false,
+    });
+
+    const execute = async (name, args) => {
+      if (name === "search_law") return { items: [{ title: args.query, mst: "284415" }] };
+      return { rawText: "제750조(불법행위의 내용)\n실제 조문" };
+    };
+    assert.deepEqual(await enrichLawReferences("민법 제756조", null, execute), []);
+    assert.deepEqual(await enrichLawReferences("민법 제756조", null, async (name, args) => {
+      if (name === "search_law") return { items: [{ title: args.query, mst: "284415" }] };
+      return { rawText: "제750조\n제751조" };
+    }), []);
+    assert.equal((await enrichLawReferences("민법 제756조", null, async (name, args) => {
+      if (name === "search_law") return { items: [{ title: args.query, mst: "284415" }] };
+      return { rawText: "제756조(손해배상)\n실제 조문" };
+    })).length, 1);
   });
 
   test("articleToJoNo converts article and branch numbers and ignores invalid input", () => {

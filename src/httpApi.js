@@ -55,6 +55,12 @@ function sendSse(response, event, payload) {
   response.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
 }
 
+function isHealthProbeAuthorized(request) {
+  const expected = process.env.CASE_FINDER_HEALTH_TOKEN;
+  if (!expected) return true;
+  return request.headers["x-case-finder-health-token"] === expected;
+}
+
 async function readBody(request) {
   const declaredLength = Number(request.headers["content-length"]);
   if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) {
@@ -162,12 +168,11 @@ async function codexQuotaStatus(codexAccountManagerImpl) {
 
 async function quotaStatus({
   codexAccountManagerImpl = getDefaultCodexAccountManager,
-  codexRuntimeImpl = getDefaultCodexAppServerRuntime,
+  includeCodex = config.searchAdapter === "luna_native",
 } = {}) {
-  const [gemini, codexQuota] = await Promise.all([
-    geminiQuotaStatus(),
-    codexQuotaStatus(codexAccountManagerImpl),
-  ]);
+  const tasks = [geminiQuotaStatus()];
+  if (includeCodex) tasks.push(codexQuotaStatus(codexAccountManagerImpl));
+  const [gemini, codexQuota = { loggedIn: false, available: false, remainingPercent: null, windowKind: "unknown", windowLabel: "" }] = await Promise.all(tasks);
   return {
     gemini,
     codexQuota,
@@ -184,8 +189,8 @@ function emptyLunaHealth() {
   };
 }
 
-async function lunaHealth(codexRuntimeImpl) {
-  if (config.searchAdapter !== "luna_native") return emptyLunaHealth();
+async function lunaHealth(codexRuntimeImpl, searchAdapter = config.searchAdapter) {
+  if (searchAdapter !== "luna_native") return emptyLunaHealth();
   try {
     const runtime = await codexRuntimeImpl().inspect();
     return {
@@ -212,17 +217,18 @@ async function lunaHealth(codexRuntimeImpl) {
 export async function healthPayload({
   codexAccountManagerImpl = getDefaultCodexAccountManager,
   codexRuntimeImpl = getDefaultCodexAppServerRuntime,
+  searchAdapter = config.searchAdapter,
 } = {}) {
   const [luna, quota] = await Promise.all([
-    lunaHealth(codexRuntimeImpl),
-    quotaStatus({ codexAccountManagerImpl, codexRuntimeImpl }),
+    lunaHealth(codexRuntimeImpl, searchAdapter),
+    quotaStatus({ codexAccountManagerImpl, includeCodex: searchAdapter === "luna_native" }),
   ]);
   return {
     service: PRODUCT_SERVICE,
     ok: true,
     node: process.version,
     expectedNode: EXPECTED_NODE_VERSION,
-    adapter: { id: config.searchAdapter, label: adapterLabel(config.searchAdapter) },
+    adapter: { id: searchAdapter, label: adapterLabel(searchAdapter) },
     mcp: getMcpStatus(),
     codex: { ...luna, transport: "app_server" },
     luna,
@@ -395,6 +401,10 @@ export function createRequestHandler({
       const url = new URL(request.url, `http://${request.headers.host}`);
       if (request.method === "GET" && (await serveAsset(url.pathname, response))) return;
       if (request.method === "GET" && url.pathname === "/health") {
+        if (!isHealthProbeAuthorized(request)) {
+          sendJson(response, 404, { ok: false, message: "Health endpoint not found." });
+          return;
+        }
         sendJson(response, 200, await healthPayloadImpl());
         return;
       }

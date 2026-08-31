@@ -1,7 +1,7 @@
 import { config } from "../config.js";
 import { callTool } from "./mcpClient.js";
 import { classifyLegalResult, LEGAL_RESULT_CATEGORIES } from "./legalResultClassifier.js";
-import { dedupeLawReferences, lawReferenceIdentityKey } from "./lawReferences.js";
+import { dedupeLawReferences, lawReferenceIdentityKey, normalizeLawArticle, normalizeLawName } from "./lawReferences.js";
 import { caseNumberIncludes, normalizeCaseNumber } from "./router.js";
 import { text } from "./text.js";
 import {
@@ -9,12 +9,13 @@ import {
   decodeBasicHtml,
   parseDecisionDetail,
   parseDecisionSearchResults,
+  parseLawArticleIdentity,
   parseLawSearchResults,
   toolText,
 } from "./legalMcpParser.js";
 
 const ARTICLE_PATTERN = /(?:제)?\d+조(?:의\d+)?(?:제\d+항)?(?:제\d+호)?/g;
-const LAW_NAME_PATTERN = /([가-힣][가-힣0-9·()「」ㆍ\s]{0,79}(?:시행규칙|시행령|법률|헌법|규칙|법))\s*$/u;
+const LAW_NAME_PATTERN = /([「『]?[가-힣][가-힣0-9·()「」『』ㆍ\s]{0,79}(?:시행규칙|시행령|법률|헌법|규칙|법)[」』]?)\s*$/u;
 
 export { parseDecisionDetail, parseDecisionSearchResults, parseLawSearchResults, toolText } from "./legalMcpParser.js";
 
@@ -119,10 +120,6 @@ function rawToolText(result) {
   return typeof result?.rawText === "string" && result.rawText ? result.rawText : toolText(result);
 }
 
-function normalizedLawName(value) {
-  return text(value).replace(/\s+/gu, "").replace(/^대한민국헌법$/u, "헌법");
-}
-
 function cleanLawArticleText(rawText) {
   const text = cleanText(rawText);
   const articleStart = text.search(/(?:^|\n)\s*제\d+조(?:의\d+)?/);
@@ -143,7 +140,10 @@ export function parseStatuteReferences(referenceText) {
     const articleIndex = clause.search(/(?:제)?\d+조/);
     if (articleIndex < 0) continue;
     const lawMatch = clause.slice(0, articleIndex).match(LAW_NAME_PATTERN);
-    if (lawMatch?.[1]) currentLaw = lawMatch[1].replace(/^\[\d+\]\s*/, "").trim();
+    if (lawMatch?.[1]) currentLaw = lawMatch[1]
+      .replace(/^\[\d+\]\s*/, "")
+      .replace(/^[「『]|[」』]$/gu, "")
+      .trim();
     const lawName = currentLaw;
     if (!lawName) continue;
     for (const articleMatch of clause.slice(articleIndex).matchAll(ARTICLE_PATTERN)) {
@@ -181,8 +181,8 @@ export async function findLawCandidate(lawName, execute, cache = new Map()) {
       parsedItems: candidates.length > 0,
     });
     if (searchCategory !== LEGAL_RESULT_CATEGORIES.SUCCESS) return null;
-    const target = normalizedLawName(lawName);
-    const candidate = candidates.find((item) => normalizedLawName(item.title) === target);
+    const target = normalizeLawName(lawName);
+    const candidate = candidates.find((item) => normalizeLawName(item.title) === target);
     return candidate?.mst || candidate?.lawId ? candidate : null;
   })();
   cache.set(key, promise);
@@ -214,11 +214,14 @@ export async function enrichLawReferences(referenceText, telemetry = null, execu
             });
             const rawLawText = lawResultText(lawResult);
             const lawText = cleanLawArticleText(rawLawText);
+            const lawArticle = parseLawArticleIdentity(rawLawText);
+            const requestedArticle = normalizeLawArticle(reference.article);
             const lawCategory = classifyLegalResult(lawResult, {
               toolName: "get_law_text",
               rawText: rawToolText(lawResult),
             });
-            return lawCategory === LEGAL_RESULT_CATEGORIES.SUCCESS && lawText ? { lawText } : null;
+            const articleMatches = lawArticle.identifiable && lawArticle.article === requestedArticle;
+            return lawCategory === LEGAL_RESULT_CATEGORIES.SUCCESS && lawText && articleMatches ? { lawText } : null;
           })();
           cache.set(detailKey, detailPromise);
         }
