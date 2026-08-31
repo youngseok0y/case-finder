@@ -243,3 +243,16 @@ The 41 finding closure is complete. Deterministic verification, 100/100/100
 coverage, zero high-severity production audit findings, managed runtime,
 staging validation, Gemini smoke, Luna smoke, and direct-route smoke all pass.
 Installer construction remains intentionally outside this pre-package gate.
+
+## Documentation synchronization
+
+After the acceptance snapshot above, the canonical documentation structure and
+report archive were published to both release lines:
+
+- `main` documentation commit: `64d24a3`
+- `release` documentation merge commit: `9cf3c9e`
+
+These references identify the commits that introduced the synchronized
+technical documents and `docs/reports/` layout. This metadata update is
+recorded separately and does not change the acceptance decision or production
+code.
