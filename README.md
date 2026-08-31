@@ -1,50 +1,51 @@
-# Case Finder
+# Case Finder 사용자 가이드
 
-Case Finder is a local Korean legal precedent search application. It retrieves provider-authored legal source material through the restricted legal MCP surface and shows only verified results.
+## 1. Case Finder가 무엇인가요?
 
-## Current product boundary
+Case Finder는 자연어 또는 사건번호로 판례를 검색할 수 있는 Windows 애플리케이션이에요. 국가법령정보 공동활용 API를 기반으로 검색 결과를 검증해서 제공하며, 검색 엔진으로는 Gemini 빠른 검색 또는 Luna 고정밀 검색을 선택해서 사용할 수 있어요.
 
-- Product adapters: `gemini_d` and `luna_native`
-- Search display is fixed at `20`; `candidateMax=20`
-- Gemini: pinned deterministic plan/selection flow with `gemini-3.5-flash-lite`
-- Luna: Native AO-v2; Free/Go request `gpt-5.6-terra`, other/unknown plans request `gpt-5.6-luna`, with `medium` reasoning
-- Legal MCP tools: `search_decisions`, `search_law`, `get_decision_text`, `get_law_text`
-- Final cases require provider-observed identity and successful detail verification
-- Luna keeps `EvidenceLedger`, `FinalSelectionGate`, and verified-only output
-- Provider failures are not silently changed to another adapter
-- Codex authentication is isolated in the product-owned `state/codex-home` and uses file credentials only
+Case Finder의 가장 중요한 원칙은 검색 결과를 억지로 만들어내지 않는다는 점이에요. 근거가 확인되지 않는 질의에 대해 존재하지 않는 판례를 지어내는 대신, 확인 가능한 판례만 반환해요.
 
-## Requirements
+## 2. 검색 방식
 
-- Windows local runtime or Node.js `>=24.14.0 <25`
-- A configured law.go Open API credential in `.env` as `LAW_OC`
-- `GEMINI_API_KEY` for the Gemini adapter
-- Packaged installations provide private Node.js and the pinned Codex app-server runtime
+**Gemini 빠른 검색**
+Gemini API를 이용한 자연어 판례 검색이에요. 검색 속도는 빠르지만 정확도는 다소 떨어질 수 있어요.
 
-## Development
+**Luna 고정밀 검색**
+ChatGPT/Codex 인증을 이용하는 에이전트형 판례 검색이에요. 검색에 시간이 다소 걸리지만 비교적 정확한 결과를 얻을 수 있어요.
 
-```powershell
-npm ci
-npm start
-npm run verify
-```
+**사건번호 직접 검색**
+`2023두54914`처럼 사건번호를 입력하면 AI 검색 과정을 거치지 않고 해당 판례를 직접 조회해요.
 
-The server binds to `127.0.0.1`. In a source checkout, `start.bat` uses the local `node.exe` on `PATH` when the packaged runtime is absent. `npm run verify` performs the syntax check and the network/model-free product test suite. `npm run verify:managed -- --skip-query` checks the packaged runtime contract without making a live legal query.
+충분한 근거가 확인되지 않는 질의는 결과 없음으로 표시될 수 있어요. 이는 오류가 아니라 판례를 임의로 지어내지 않기 위한 설계이며, 이 경우 화면에 안내되는 대체 조회 방법을 참고하시면 돼요.
 
-For development-only Codex re-authentication, run `codex-login.bat` from the repository root. It requires local Node.js `>=24.14.0 <25` and the Windows x64 Codex package installed by `npm ci`; it always uses `<repo>\state\codex-home`, forces `cli_auth_credentials_store = "file"`, and never inherits, imports, or falls back to the user's global Codex authentication. The helper is checkout-specific and is not the managed installer entrypoint.
+## 3. 설치 및 실행
 
-## Codex authentication isolation
+1. 설치 파일을 실행한 뒤 Case Finder를 시작합니다.
+2. Gemini 빠른 검색을 사용할 경우 관리 설정 창에서 Gemini API Key를 입력하고, Luna 고정밀 검색을 사용할 경우 관리 설정 창에서 최초 1회 Codex 인증을 진행합니다.
 
-Case Finder uses `config.codexHomePath`, which is `state/codex-home` under the install root. Case Finder login, logout, account switching, cancellation, token refresh, and Luna app-server sessions use only that dedicated namespace. A missing or unsafe dedicated home, a failed `config.toml` preparation, or an effective credential store other than `file` stops the app-server instead of falling back to `%USERPROFILE%\.codex` or `$HOME/.codex`.
+## 4. API 키 발급 안내
 
-Case Finder does not import or reuse an existing Codex CLI/Desktop/IDE login. Users must sign in separately. Global Codex authentication files and tokens are not read, copied, modified, deleted, or exposed in the UI or logs.
+Case Finder는 `.env` 파일을 직접 편집할 필요 없이, 관리 설정 창에서 아래 키를 입력하도록 되어 있어요.
 
-## Configuration
+**Gemini API Key**
+1. Google AI Studio(aistudio.google.com)에 접속해서 Google 계정으로 로그인합니다.
+2. 화면의 'Get API key' 버튼을 클릭합니다.
+3. 처음 사용하는 계정이라 연결된 프로젝트가 없다면, 프로젝트를 만들라는 안내가 나옵니다. '새 프로젝트 만들기'를 선택하고 이름을 입력해 프로젝트를 하나 생성합니다. Gemini API는 내부적으로 이 프로젝트 단위로 사용량을 관리하지만, Google Cloud Console에서 별도로 설정할 내용은 없습니다.
+4. '키 만들기'(또는 API 키 만들기) 버튼을 클릭하고, 방금 만든 프로젝트를 선택하면 키가 즉시 발급됩니다.
+5. 발급된 키를 복사해서 관리 설정 창의 Gemini API Key 항목에 입력합니다.
 
-Use `.env.example` as the template. `SEARCH_ADAPTER` accepts only `gemini_d` or `luna_native`. Search depth and candidate limits are intentionally fixed at 20 for the pre-release product baseline.
+결제 없이 무료 티어로 바로 사용할 수 있어요.
 
-## Packaging
+**국가법령정보 OC 키**
+1. 국가법령정보 공동활용(open.law.go.kr)에서 회원가입합니다.
+2. 오픈API를 신청하고, 발급되는 OC 값을 확인합니다.
+3. 발급받은 OC 값을 관리 설정 창의 해당 항목에 입력합니다.
 
-`packaging/runtime-manifest.json` describes the managed installation layout. `packaging/prune-staging.mjs` applies the validated dependency allowlist during staging; it refuses targets outside the staging `node_modules` directory.
+두 키 모두 사용자 본인 계정으로 개별 발급받아야 해요.
 
-The application must not expose provider credentials, private reasoning, system prompts, raw tool planning, or authentication tokens in the UI or logs.
+## 5. Luna 최초 인증
+
+Luna 고정밀 검색을 처음 사용할 때는 Codex 로그인이 필요해요. 인증을 완료하면 이후부터는 Case Finder에서 Luna 고정밀 검색을 바로 사용할 수 있어요.
+
+이 인증은 Case Finder 전용 인증 영역(관리 설정 창)에서 이루어져요.
