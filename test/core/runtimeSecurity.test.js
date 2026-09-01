@@ -317,9 +317,9 @@ await (async () => {
       assert.match(`${missing.stdout}\n${missing.stderr}`, /expected prune target is missing/iu);
 
       for (const relativePath of [
-        "node_modules/sharp",
-        "node_modules/@img/colour",
-        "node_modules/@img/sharp-win32-x64",
+        "app/node_modules/sharp",
+        "app/node_modules/@img/colour",
+        "app/node_modules/@img/sharp-win32-x64",
       ]) {
         await fs.mkdir(path.join(stageRoot, relativePath), { recursive: true });
       }

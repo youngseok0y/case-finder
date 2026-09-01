@@ -6,9 +6,9 @@ Packaging turns the source checkout into a self-contained Windows application
 payload. The canonical layout and include/exclude contract is
 `packaging/runtime-manifest.json`.
 
-The repository currently defines and verifies the staging contract. Installer
-construction is a separate phase; this document does not claim that an
-installer builder is present in the source tree.
+The repository defines and verifies the staging contract and contains the
+NSIS installer recipe. The NSIS compiler remains an external build tool and
+installer binaries are build outputs, not source-controlled product files.
 
 ## 2. Install layout
 
@@ -27,6 +27,8 @@ install root `%LOCALAPPDATA%\CaseFinder`:
 ├── runtime\
 │   └── node\
 │       └── node.exe
+├── assets\
+│   └── case-finder.ico
 └── logs\
 ```
 
@@ -56,7 +58,7 @@ The payload includes:
 - production dependencies installed into `app/node_modules/`;
 - `prompts/plan.txt` and `prompts/select.txt`;
 - `config.js`, `package.json`, and `package-lock.json`;
-- `.env.example`, `start.bat`, and `case-finder.ico`;
+- `.env.example`, `start.bat`, and `assets/case-finder.ico`;
 - managed Node at `runtime/node/node.exe`.
 
 The payload excludes:
@@ -73,7 +75,7 @@ product runtime resources.
 
 `start.bat` cannot embed a custom Windows icon because batch files do not carry
 icon resources. The installer or a Windows shortcut targeting `start.bat` must
-use the adjacent `case-finder.ico` as its icon location.
+use `assets/case-finder.ico` as its icon location.
 
 ## 5. Dependency installation and prune
 
@@ -126,18 +128,27 @@ For a live Luna acceptance check, use a dedicated staging `state/` and omit
 explicitly authorized. Do not copy source-checkout authentication into a
 release artifact.
 
-## 7. Installer build boundary
+## 7. Installer build
 
-The installer phase is intentionally outside the source/runtime contract
-above. When implemented, it must:
+`packaging/build-staging.mjs` assembles an external, initially empty staging
+root from the approved source files. It deliberately omits dependencies so a
+clean `npm ci --omit=dev` can populate `app/node_modules/` in the staging
+root. `packaging/prune-staging.mjs` then removes the approved optional native
+payloads, and `packaging/CaseFinder.nsi` compiles the per-user installer.
 
-1. create the install root and preserve the `app/`, `runtime/`, and `logs/`
-   layout;
-2. install the managed Node payload and preinstalled dependencies;
-3. leave `.env` and `state/` for first-run configuration/authentication;
-4. avoid embedding secrets or source-checkout Codex state;
-5. provide a clean uninstall path for product files and generated runtime
-   state.
+Run the build with an externally provisioned NSIS compiler and an output path
+outside the repository when possible:
+
+```powershell
+.\packaging\build-installer.ps1 `
+  -StageRoot "$env:TEMP\CaseFinder-staging" `
+  -OutputPath "$env:TEMP\CaseFinderSetup.exe"
+```
+
+The staging root must be empty and outside the source checkout. The installer
+uses `%LOCALAPPDATA%\CaseFinder`, requests the normal user execution level,
+and keeps `.env`, `state/`, and `logs/` outside the immutable replacement and
+normal uninstall sets.
 
 ## 8. Clean-machine acceptance
 

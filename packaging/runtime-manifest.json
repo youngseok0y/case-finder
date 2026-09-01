@@ -6,6 +6,7 @@
     "app": "app",
     "node": "runtime/node/node.exe",
     "node_modules": "app/node_modules",
+    "assets": "assets",
     "logs": "logs"
   },
   "runtime": {
@@ -39,7 +40,7 @@
     "runtime/node/node.exe",
     ".env.example",
     "start.bat",
-    "case-finder.ico"
+    "assets/case-finder.ico"
   ],
   "exclude": [
     ".git/",
@@ -53,6 +54,7 @@
     "coverage/",
     "dist/",
     "release/",
+    "codex-login.bat",
     "*.exe",
     "*.zip"
   ],

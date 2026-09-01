@@ -30,11 +30,11 @@ async function main() {
     : [Number(level)];
   if (!levels.every((value) => LEVELS[value])) throw new Error(`invalid --level: ${level}`);
 
-  const nodeModulesRoot = path.resolve(stageRoot, "node_modules");
+  const nodeModulesRoot = path.resolve(stageRoot, "app", "node_modules");
   const removed = [];
   for (const currentLevel of levels) {
     for (const relativePath of LEVELS[currentLevel]) {
-      const target = path.resolve(stageRoot, relativePath);
+      const target = path.resolve(nodeModulesRoot, relativePath.replace(/^node_modules[\\/]/u, ""));
       if (!target.startsWith(nodeModulesRoot + path.sep)) throw new Error(`target escaped node_modules: ${relativePath}`);
       try {
         await stat(target);

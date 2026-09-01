@@ -1,5 +1,5 @@
 @echo off
-rem The installer or shortcut should use case-finder.ico as the launcher icon.
+rem The installer or shortcut should use assets\case-finder.ico as the launcher icon.
 setlocal EnableExtensions DisableDelayedExpansion
 
 set "CASE_FINDER_ROOT=%~dp0"

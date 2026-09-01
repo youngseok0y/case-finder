@@ -4,7 +4,8 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { inspectPackagedCodexAppServerRuntime } from "./codexAppServerRuntime.js";
 import { resolveRuntimePaths } from "./runtimePaths.js";
 
@@ -192,7 +193,12 @@ async function main() {
   requiredFile(paths.serverPath, "server");
 
   const nodeVersion = versionOf(paths.managedNodePath, ["--version"]);
-  const appServerRuntime = await inspectPackagedCodexAppServerRuntime({ platform: "win32", arch: "x64" });
+  const appRequire = createRequire(path.join(appRoot, "package.json"));
+  const appServerRuntime = await inspectPackagedCodexAppServerRuntime({
+    platform: "win32",
+    arch: "x64",
+    resolvePackage: (name) => pathToFileURL(appRequire.resolve(name)).href,
+  });
   verifyAppServerCapabilities(appServerRuntime);
 
   const requestedPort = optionValue("--port") || process.env.M9RR3_VERIFY_PORT || "";
@@ -203,11 +209,14 @@ async function main() {
     ...process.env,
     CASE_FINDER_INSTALL_ROOT: installRoot,
     CASE_FINDER_APP_ROOT: appRoot,
-    CASE_FINDER_ENV_PATH: process.env.CASE_FINDER_ENV_PATH || paths.envPath,
+    CASE_FINDER_ENV_PATH: paths.envPath,
     PORT: String(port),
     CASE_FINDER_HEALTH_TOKEN: healthToken,
     SEARCH_ADAPTER: process.env.SEARCH_ADAPTER || "luna_native",
   };
+  delete childEnv.LAW_OC;
+  delete childEnv.GEMINI_API_KEY;
+  delete childEnv.CASE_FINDER_SKIP_DOTENV;
   const child = spawn(paths.managedNodePath, [paths.serverPath], {
     cwd: paths.appRoot,
     env: childEnv,
